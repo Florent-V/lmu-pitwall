@@ -52,6 +52,8 @@ struct TelemetryState {
     /// Whether this car supports Virtual Energy (derived from telemetry).
     /// None = not yet determined.
     ve_available: Option<bool>,
+    /// Latest wearables snapshot from RepairAndRefuel REST API.
+    wearables: garage_api::WearablesSnapshot,
 }
 
 impl TelemetryState {
@@ -64,6 +66,7 @@ impl TelemetryState {
             electronics: ElectronicsSnapshot::default(),
             ve_history: None,
             ve_available: None,
+            wearables: garage_api::WearablesSnapshot::default(),
         }
     }
 }
@@ -289,6 +292,7 @@ fn build_vehicle_status(
     sc:  Option<&rF2ScoringBuffer>,
     rules: Option<&rF2RulesBuffer>,
     player_id: i32,
+    wearables: &garage_api::WearablesSnapshot,
 ) -> ServerMessage {
     // --- Damage from telemetry ---
     let (overheating, any_detached, dent_severity, last_impact_magnitude, last_impact_et,
@@ -365,6 +369,9 @@ fn build_vehicle_status(
         last_impact_et,
         tire_flat,
         tire_detached,
+        aero_damage: wearables.aero_damage,
+        brake_wear: wearables.brake_wear,
+        suspension_damage: wearables.suspension_damage,
         yellow_flag_state,
         sector_flags,
         start_light,
@@ -390,6 +397,7 @@ async fn task_polling(
     state: Arc<RwLock<TelemetryState>>,
     ws: Arc<WebSocketServer>,
     ws_port: u16,
+    connection_status_tx: tokio::sync::watch::Sender<Option<ServerMessage>>,
 ) {
     let mut reader = SharedMemoryReader::new();
     let mut was_connected = false;
@@ -399,6 +407,9 @@ async fn task_polling(
 
     // Channel for strategy/usage VE fetch results.
     let (strategy_tx, mut strategy_rx) = tokio::sync::mpsc::channel::<Vec<f64>>(4);
+
+    // Channel for wearables (RepairAndRefuel) fetch results.
+    let (wearables_tx, mut wearables_rx) = tokio::sync::mpsc::channel::<garage_api::WearablesSnapshot>(4);
 
     let mut poll_ticker = tokio::time::interval(Duration::from_millis(20)); // 50 Hz
     poll_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -410,6 +421,10 @@ async fn task_polling(
     // strategy/usage VE poll every 3 seconds.
     let mut strategy_ticker = tokio::time::interval(Duration::from_secs(3));
     strategy_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    // Wearables poll every 2 seconds (damage changes slowly).
+    let mut wearables_ticker = tokio::time::interval(Duration::from_secs(2));
+    wearables_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     // Player name for strategy/usage lookup (extracted from scoring).
     let mut last_player_name = String::new();
@@ -507,6 +522,23 @@ async fn task_polling(
                 state.write().await.ve_history = Some(history);
             }
 
+            // --- wearables poll (0.5 Hz) ---
+            _ = wearables_ticker.tick() => {
+                if reader.is_connected() {
+                    let tx = wearables_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        if let Some(w) = garage_api::fetch_wearables() {
+                            let _ = tx.blocking_send(w);
+                        }
+                    });
+                }
+            }
+
+            // --- wearables result ---
+            Some(w) = wearables_rx.recv() => {
+                state.write().await.wearables = w;
+            }
+
             // --- 0.5 Hz health check / reconnect ---
             _ = health_ticker.tick() => {
                 // Close and re-open: the only reliable way to detect LMU
@@ -518,20 +550,24 @@ async fn task_polling(
                     (false, true) => {
                         // LMU just started (or bridge started while LMU was already running).
                         info!("Connected to Le Mans Ultimate shared memory — broadcasting on ws://0.0.0.0:{}", ws_port);
-                        ws.broadcast(ServerMessage::ConnectionStatus {
+                        let msg = ServerMessage::ConnectionStatus {
                             game_connected: true,
                             plugin_version: String::from("rF2SharedMemoryMapPlugin"),
-                        });
+                        };
+                        ws.broadcast(msg.clone());
+                        let _ = connection_status_tx.send(Some(msg));
                         state.write().await.is_connected = true;
                         was_connected = true;
                     }
                     (true, false) => {
                         // LMU exited or plugin unloaded.
                         warn!("Lost connection to Le Mans Ultimate — waiting for reconnect");
-                        ws.broadcast(ServerMessage::ConnectionStatus {
+                        let msg = ServerMessage::ConnectionStatus {
                             game_connected: false,
                             plugin_version: String::new(),
-                        });
+                        };
+                        ws.broadcast(msg.clone());
+                        let _ = connection_status_tx.send(Some(msg));
                         let mut s = state.write().await;
                         s.is_connected = false;
                         s.telemetry    = None;
@@ -697,6 +733,7 @@ async fn task_broadcaster(
                     s.scoring.as_ref(),
                     s.rules.as_ref(),
                     player_id,
+                    &s.wearables,
                 ))
             } else {
                 None
@@ -997,16 +1034,21 @@ async fn main() -> Result<()> {
     let (version_info_tx, version_info_rx) =
         tokio::sync::watch::channel::<Option<ServerMessage>>(None);
 
+    // Watch channel for ConnectionStatus (sent to new clients on connect so they
+    // never see "Waiting" when LMU was already running before the dashboard opened).
+    let (connection_status_tx, connection_status_rx) =
+        tokio::sync::watch::channel::<Option<ServerMessage>>(None);
+
     let state = Arc::new(RwLock::new(TelemetryState::new()));
     let engineer_service = Arc::new(race_engineer::RaceEngineerService::new());
-    let ws    = Arc::new(WebSocketServer::new(config.ws_port, all_drivers_rx, version_info_rx, engineer_service.clone()));
+    let ws    = Arc::new(WebSocketServer::new(config.ws_port, all_drivers_rx, version_info_rx, connection_status_rx, engineer_service.clone()));
 
     // Task 1 + 3: Shared memory polling + health check
     {
         let state = state.clone();
         let ws    = ws.clone();
         let port  = config.ws_port;
-        tokio::spawn(async move { task_polling(state, ws, port).await });
+        tokio::spawn(async move { task_polling(state, ws, port, connection_status_tx).await });
     }
 
     // Task 2: Rate-limited WebSocket broadcaster
