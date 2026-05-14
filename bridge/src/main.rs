@@ -282,6 +282,7 @@ fn build_session_info(sc: &rF2ScoringBuffer, forecast: Vec<garage_api::WeatherFo
             air_temp:       info.mAmbientTemp,
             track_temp:     info.mTrackTemp,
             rain_intensity: info.mRaining,
+            dark_cloud:     info.mDarkCloud,
             forecast,
         },
         // Filter mMaxLaps: time-based races use 999999, uninitialized can be INT32_MAX.
@@ -433,8 +434,8 @@ async fn task_polling(
     let mut wearables_ticker = tokio::time::interval(Duration::from_secs(2));
     wearables_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    // Weather forecast poll every 30 seconds (forecast changes very slowly).
-    let mut forecast_ticker = tokio::time::interval(Duration::from_secs(30));
+    // Weather forecast poll every 5 seconds.
+    let mut forecast_ticker = tokio::time::interval(Duration::from_secs(5));
     forecast_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     // Player name for strategy/usage lookup (extracted from scoring).

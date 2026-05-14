@@ -27,6 +27,7 @@ export interface WeatherData {
   air_temp: number
   track_temp: number
   rain_intensity: number
+  dark_cloud: number          // 0.0–1.0 cloud coverage
   forecast: WeatherForecastNode[]
 }
 

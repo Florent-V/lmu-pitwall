@@ -34,6 +34,7 @@ pub struct WeatherData {
     pub air_temp: f64,
     pub track_temp: f64,
     pub rain_intensity: f64,
+    pub dark_cloud: f64,        // cloud coverage 0.0–1.0 (mDarkCloud)
     /// 5 forecast nodes: 0%, 25%, 50%, 75%, 100% of session length.
     /// Empty when LMU REST API is unavailable.
     pub forecast: Vec<WeatherForecastNode>,
