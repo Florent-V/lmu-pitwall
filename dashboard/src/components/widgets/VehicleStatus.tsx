@@ -95,7 +95,7 @@ function ZoneTile({ label, severity }: { label: string; severity: number }) {
       </span>
       {severity > 0 && (
         <span style={{ fontFamily: fonts.mono, fontSize: 9, fontWeight: 700, color: text, letterSpacing: 0.5 }}>
-          {severity === 2 ? 'SEVERE' : 'DENT'}
+          {severity === 2 ? 'HEAVY' : 'LIGHT'}
         </span>
       )}
     </div>
