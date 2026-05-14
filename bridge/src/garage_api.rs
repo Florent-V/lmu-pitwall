@@ -1,18 +1,22 @@
-//! LMU REST API client — reads strategy VE history and wearables damage.
+//! LMU REST API client — reads strategy VE history, wearables damage, and weather forecast.
 //!
 //! Endpoints:
 //!   GET http://localhost:6397/rest/strategy/usage
 //!   GET http://localhost:6397/rest/garage/UIScreen/RepairAndRefuel
+//!   GET http://localhost:6397/rest/sessions/weather
 //!
 //! On non-Windows builds these always return `None` — the API is only
 //! available when LMU is running on Windows.
 
-const STRATEGY_USAGE_URL: &str = "http://localhost:6397/rest/strategy/usage";
+const STRATEGY_USAGE_URL:  &str = "http://localhost:6397/rest/strategy/usage";
 const REPAIR_AND_REFUEL_URL: &str = "http://localhost:6397/rest/garage/UIScreen/RepairAndRefuel";
+const WEATHER_FORECAST_URL: &str = "http://localhost:6397/rest/sessions/weather";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
+
+pub use crate::protocol::messages::WeatherForecastNode;
 
 /// Wearables snapshot from `/rest/garage/UIScreen/RepairAndRefuel`.
 /// All values are fractions 0.0 (no damage/wear) to 1.0 (destroyed).
@@ -47,13 +51,20 @@ pub fn fetch_wearables() -> Option<WearablesSnapshot> {
     imp::fetch_wearables()
 }
 
+/// Fetch weather forecast for the current session type (blocking, 2 s timeout).
+/// `session` is the rF2 mSession integer (0=testday, 1-4=practice, 5-8=qual, 9=warmup, 10-13=race).
+/// Returns 5 nodes covering 0%, 25%, 50%, 75%, 100% of session length.
+pub fn fetch_weather_forecast(session: i32) -> Option<Vec<WeatherForecastNode>> {
+    imp::fetch_weather_forecast(session)
+}
+
 // ---------------------------------------------------------------------------
 // Windows implementation
 // ---------------------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
 mod imp {
-    use super::{STRATEGY_USAGE_URL, REPAIR_AND_REFUEL_URL, WearablesSnapshot};
+    use super::{STRATEGY_USAGE_URL, REPAIR_AND_REFUEL_URL, WEATHER_FORECAST_URL, WearablesSnapshot, WeatherForecastNode};
 
     pub fn fetch_strategy_ve(player_name: &str) -> Option<Vec<f64>> {
         let response = ureq::get(STRATEGY_USAGE_URL)
@@ -113,6 +124,46 @@ mod imp {
         Some(WearablesSnapshot { aero_damage, brake_wear, suspension_damage })
     }
 
+    pub fn fetch_weather_forecast(session: i32) -> Option<Vec<WeatherForecastNode>> {
+        let session_key = match session {
+            0..=4 => "PRACTICE",
+            5..=9 => "QUALIFY",
+            _     => "RACE",
+        };
+
+        let response = ureq::get(WEATHER_FORECAST_URL)
+            .timeout(std::time::Duration::from_secs(2))
+            .call()
+            .map_err(|e| tracing::debug!("Weather forecast API unavailable: {}", e))
+            .ok()?;
+
+        let json: serde_json::Value = response
+            .into_json()
+            .map_err(|e| tracing::warn!("Weather forecast JSON parse error: {}", e))
+            .ok()?;
+
+        let session_data = json.get(session_key)?;
+
+        const NODE_NAMES: [&str; 5] = ["START", "NODE_25", "NODE_50", "NODE_75", "FINISH"];
+        let nodes: Vec<WeatherForecastNode> = NODE_NAMES.iter()
+            .filter_map(|name| {
+                let node = session_data.get(name)?;
+                let sky_type   = node.get("WNV_SKY")?.get("currentValue")?.as_f64()? as i32;
+                let temperature = node.get("WNV_TEMPERATURE")?.get("currentValue")?.as_f64()?;
+                let rain_raw   = node.get("WNV_RAIN_CHANCE")?.get("currentValue")?.as_f64()?;
+                let rain_chance = (rain_raw * 0.01).clamp(0.0, 1.0);
+                Some(WeatherForecastNode { sky_type, temperature, rain_chance })
+            })
+            .collect();
+
+        if nodes.is_empty() {
+            return None;
+        }
+
+        tracing::debug!("Weather forecast: {} nodes for session key '{}'", nodes.len(), session_key);
+        Some(nodes)
+    }
+
     fn parse_wheel_array(val: Option<&serde_json::Value>) -> [f64; 4] {
         val.and_then(|v| v.as_array())
             .and_then(|arr| {
@@ -137,13 +188,17 @@ mod imp {
 
 #[cfg(not(target_os = "windows"))]
 mod imp {
-    use super::WearablesSnapshot;
+    use super::{WearablesSnapshot, WeatherForecastNode};
 
     pub fn fetch_strategy_ve(_player_name: &str) -> Option<Vec<f64>> {
         None
     }
 
     pub fn fetch_wearables() -> Option<WearablesSnapshot> {
+        None
+    }
+
+    pub fn fetch_weather_forecast(_session: i32) -> Option<Vec<WeatherForecastNode>> {
         None
     }
 }
