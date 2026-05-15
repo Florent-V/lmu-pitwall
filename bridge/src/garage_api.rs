@@ -98,6 +98,12 @@ mod imp {
 
         let w = json.get("wearables")?;
 
+        // TODO: remove this log once wheel order [FL, FR, RL, RR] is confirmed for the REST API.
+        tracing::info!(
+            "RepairAndRefuel raw wearables: {}",
+            serde_json::to_string(w).unwrap_or_default()
+        );
+
         let aero_damage = w
             .get("body").and_then(|b| b.get("aero")).and_then(|v| v.as_f64())
             .unwrap_or(-1.0);
