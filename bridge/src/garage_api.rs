@@ -37,7 +37,12 @@ impl Default for WearablesSnapshot {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Fetch VE history (blocking, 2 s timeout).
+/// Fetch the full VE (virtual energy) history for the given player from
+/// `strategy/usage` (blocking, 2 s timeout).
+///
+/// Returns the per-lap VE values as a `Vec<f64>` (0.0–1.0 each).
+/// Returns `None` if LMU is not running, the API is unreachable, the
+/// player name is not found, or the history is empty.
 pub fn fetch_strategy_ve(player_name: &str) -> Option<Vec<f64>> {
     imp::fetch_strategy_ve(player_name)
 }
