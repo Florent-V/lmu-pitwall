@@ -407,9 +407,13 @@ async fn task_polling(
 
     // Channel for strategy/usage VE fetch results.
     let (strategy_tx, mut strategy_rx) = tokio::sync::mpsc::channel::<Vec<f64>>(4);
+    // Guard: skip tick if a strategy fetch is already in flight.
+    let strategy_in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Channel for wearables (RepairAndRefuel) fetch results.
     let (wearables_tx, mut wearables_rx) = tokio::sync::mpsc::channel::<garage_api::WearablesSnapshot>(4);
+    // Guard: skip tick if a wearables fetch is already in flight.
+    let wearables_in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let mut poll_ticker = tokio::time::interval(Duration::from_millis(20)); // 50 Hz
     poll_ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -506,13 +510,18 @@ async fn task_polling(
 
             // --- strategy/usage VE poll (0.33 Hz) ---
             _ = strategy_ticker.tick() => {
-                if reader.is_connected() && !last_player_name.is_empty() {
+                if reader.is_connected() && !last_player_name.is_empty()
+                    && !strategy_in_flight.load(Ordering::Relaxed)
+                {
                     let name = last_player_name.clone();
                     let tx = strategy_tx.clone();
+                    let flag = strategy_in_flight.clone();
+                    flag.store(true, Ordering::Relaxed);
                     tokio::task::spawn_blocking(move || {
                         if let Some(ve) = garage_api::fetch_strategy_ve(&name) {
                             let _ = tx.blocking_send(ve);
                         }
+                        flag.store(false, Ordering::Relaxed);
                     });
                 }
             }
@@ -524,12 +533,15 @@ async fn task_polling(
 
             // --- wearables poll (0.5 Hz) ---
             _ = wearables_ticker.tick() => {
-                if reader.is_connected() {
+                if reader.is_connected() && !wearables_in_flight.load(Ordering::Relaxed) {
                     let tx = wearables_tx.clone();
+                    let flag = wearables_in_flight.clone();
+                    flag.store(true, Ordering::Relaxed);
                     tokio::task::spawn_blocking(move || {
                         if let Some(w) = garage_api::fetch_wearables() {
                             let _ = tx.blocking_send(w);
                         }
+                        flag.store(false, Ordering::Relaxed);
                     });
                 }
             }
