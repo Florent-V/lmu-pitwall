@@ -1,27 +1,12 @@
 import { useTelemetryStore } from '../../stores/telemetryStore'
 import { colors, fonts } from '../../styles/theme'
+import { SEV_PCT, DAMAGE_ZONES } from '../../utils/damage'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-// rF2/LMU mDentSeverity[8] zone order:
-// 0=front, 1=front-left, 2=left, 3=right, 4=rear-left, 5=rear-right, 6=rear, 7=front-right
-const SEV_PCT = [0, 50, 100]
-
 const WHEEL_LABELS = ['FL', 'FR', 'RL', 'RR']
-
-// Grid layout: each zone placed in a 3×3 CSS grid (top-down car view)
-const ZONE_GRID = [
-  { idx: 1, label: 'F-L',   col: 1, row: 1 },
-  { idx: 0, label: 'FRONT', col: 2, row: 1 },
-  { idx: 7, label: 'F-R',   col: 3, row: 1 },
-  { idx: 2, label: 'LEFT',  col: 1, row: 2 },
-  { idx: 3, label: 'RIGHT', col: 3, row: 2 },
-  { idx: 4, label: 'R-L',   col: 1, row: 3 },
-  { idx: 6, label: 'REAR',  col: 2, row: 3 },
-  { idx: 5, label: 'R-R',   col: 3, row: 3 },
-]
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -153,7 +138,7 @@ function CarDiagram({ dentSeverity, aeroPct, lastImpact, overheating, anyDetache
         gridTemplateRows: 'repeat(3, auto)',
         gap: 3,
       }}>
-        {ZONE_GRID.map(({ idx, label, col, row }) => (
+        {DAMAGE_ZONES.map(({ idx, label, col, row }) => (
           <div key={idx} style={{ gridColumn: col, gridRow: row }}>
             <ZoneTile label={label} severity={dentSeverity[idx] ?? 0} />
           </div>
