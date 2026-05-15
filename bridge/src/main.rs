@@ -587,6 +587,7 @@ async fn task_polling(
                         s.rules        = None;
                         s.ve_history   = None;
                         s.ve_available = None;
+                        s.wearables    = garage_api::WearablesSnapshot::default();
                         was_connected  = false;
                         last_player_name = String::new();
                     }
