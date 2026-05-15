@@ -134,6 +134,7 @@ function sectorColor(val: number, sessionBest: number, personalBest: number): st
 
 export default function Standings() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const scrollableRef = useRef<HTMLDivElement>(null)
   const playerRowRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(500)
 
@@ -173,7 +174,10 @@ export default function Standings() {
     return map
   }, [allDrivers])
 
-  const sorted = [...vehicles].sort((a: VehicleScoring, b: VehicleScoring) => a.position - b.position)
+  const sorted = useMemo(
+    () => [...vehicles].sort((a: VehicleScoring, b: VehicleScoring) => a.position - b.position),
+    [vehicles],
+  )
   const leader = sorted[0]
 
   const playerPosition = useMemo(
@@ -181,7 +185,14 @@ export default function Standings() {
     [sorted, playerId],
   )
   useEffect(() => {
-    playerRowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const container = scrollableRef.current
+    const row = playerRowRef.current
+    if (!container || !row) return
+    const containerRect = container.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
+    const rowOffsetInContainer = rowRect.top - containerRect.top + container.scrollTop
+    const targetScrollTop = rowOffsetInContainer - container.clientHeight / 2 + rowRect.height / 2
+    container.scrollTo({ top: targetScrollTop, behavior: 'smooth' })
   }, [playerPosition, playerId])
 
   // Compute class positions: rank within each vehicle_class (sorted already by overall position)
@@ -281,7 +292,7 @@ export default function Standings() {
           Waiting for session…
         </div>
       ) : (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div ref={scrollableRef} style={{ flex: 1, overflowY: 'auto' }}>
           {sorted.map((v) => {
             const isPlayer = v.id === playerId
             const vS1 = v.best_sector1
