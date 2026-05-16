@@ -94,7 +94,7 @@ impl LapTracker {
                     snap.in_pits = v.mInPits != 0;
                     snap.finish_status = v.mFinishStatus;
 
-                    // Compound names and dent severity come from the telemetry buffer.
+                    // Compound names and dent severity come from the telemetry buffer  (all vehicles).
                     // Update and broadcast when they change (e.g. after a pit stop / collision).
                     if let Some(t) = tel {
                         let tel_num = (t.mNumVehicles as usize).min(MAX_MAPPED_VEHICLES);

@@ -8,7 +8,7 @@
 //! On non-Windows builds these always return `None` — the API is only
 //! available when LMU is running on Windows.
 
-const STRATEGY_USAGE_URL:  &str = "http://localhost:6397/rest/strategy/usage";
+const STRATEGY_USAGE_URL: &str = "http://localhost:6397/rest/strategy/usage";
 const REPAIR_AND_REFUEL_URL: &str = "http://localhost:6397/rest/garage/UIScreen/RepairAndRefuel";
 const WEATHER_FORECAST_URL: &str = "http://localhost:6397/rest/sessions/weather";
 
@@ -41,7 +41,12 @@ impl Default for WearablesSnapshot {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Fetch VE history (blocking, 2 s timeout).
+/// Fetch the full VE (virtual energy) history for the given player from
+/// `strategy/usage` (blocking, 2 s timeout).
+///
+/// Returns the per-lap VE values as a `Vec<f64>` (0.0–1.0 each).
+/// Returns `None` if LMU is not running, the API is unreachable, the
+/// player name is not found, or the history is empty.
 pub fn fetch_strategy_ve(player_name: &str) -> Option<Vec<f64>> {
     imp::fetch_strategy_ve(player_name)
 }
@@ -124,6 +129,23 @@ mod imp {
         Some(WearablesSnapshot { aero_damage, brake_wear, suspension_damage })
     }
 
+    fn parse_wheel_array(val: Option<&serde_json::Value>) -> [f64; 4] {
+        val.and_then(|v| v.as_array())
+            .and_then(|arr| {
+                if arr.len() >= 4 {
+                    Some([
+                        arr[0].as_f64().unwrap_or(-1.0),
+                        arr[1].as_f64().unwrap_or(-1.0),
+                        arr[2].as_f64().unwrap_or(-1.0),
+                        arr[3].as_f64().unwrap_or(-1.0),
+                    ])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or([-1.0; 4])
+    }
+
     pub fn fetch_weather_forecast(session: i32) -> Option<Vec<WeatherForecastNode>> {
         let session_key = match session {
             0..=4 => "PRACTICE",
@@ -162,23 +184,6 @@ mod imp {
 
         tracing::debug!("Weather forecast: {} nodes for session key '{}'", nodes.len(), session_key);
         Some(nodes)
-    }
-
-    fn parse_wheel_array(val: Option<&serde_json::Value>) -> [f64; 4] {
-        val.and_then(|v| v.as_array())
-            .and_then(|arr| {
-                if arr.len() >= 4 {
-                    Some([
-                        arr[0].as_f64().unwrap_or(-1.0),
-                        arr[1].as_f64().unwrap_or(-1.0),
-                        arr[2].as_f64().unwrap_or(-1.0),
-                        arr[3].as_f64().unwrap_or(-1.0),
-                    ])
-                } else {
-                    None
-                }
-            })
-            .unwrap_or([-1.0; 4])
     }
 }
 

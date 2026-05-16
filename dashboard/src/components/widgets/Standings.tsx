@@ -3,6 +3,7 @@ import { useTelemetryStore } from '../../stores/telemetryStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { colors, fonts } from '../../styles/theme'
 import { getClassColor } from '../../utils/classColors'
+import { DAMAGE_ZONES, dentPct } from '../../utils/damage'
 import type { VehicleScoring } from '../../types/telemetry'
 
 function hexAlpha(hex: string, alpha: number): string {
@@ -77,33 +78,13 @@ function bestS2(v: VehicleScoring): number {
   return v.best_sector1 > 0 && v.best_sector2 > 0 ? v.best_sector2 - v.best_sector1 : -1
 }
 
-// ---------------------------------------------------------------------------
-// Mini damage grid — 8 zones arranged as top-down car (3×3, center empty)
-// ---------------------------------------------------------------------------
-
-const MINI_ZONES = [
-  { idx: 1, col: 1, row: 1 },  // F-L
-  { idx: 0, col: 2, row: 1 },  // FRONT
-  { idx: 7, col: 3, row: 1 },  // F-R
-  { idx: 2, col: 1, row: 2 },  // LEFT
-  { idx: 3, col: 3, row: 2 },  // RIGHT
-  { idx: 4, col: 1, row: 3 },  // R-L
-  { idx: 6, col: 2, row: 3 },  // REAR
-  { idx: 5, col: 3, row: 3 },  // R-R
-]
-
-function dentPct(dent: number[]): number {
-  const sum = dent.reduce((s, v) => s + ([0, 50, 100][v] ?? 0), 0)
-  return Math.round(sum / (dent.length * 100) * 100)
-}
-
 function MiniDamageGrid({ dentSeverity, width }: { dentSeverity: number[]; width: number }) {
   const pct = dentPct(dentSeverity)
   const pctColor = pct >= 75 ? '#ef4444' : pct >= 40 ? '#f97316' : pct > 0 ? '#eab308' : colors.textMuted
   return (
     <div style={{ width, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 5px)', gridTemplateRows: 'repeat(3, 5px)', gap: '1px', flexShrink: 0 }}>
-        {MINI_ZONES.map(({ idx, col, row }) => {
+        {DAMAGE_ZONES.map(({ idx, col, row }) => {
           const sev = dentSeverity[idx] ?? 0
           return (
             <div key={idx} style={{
@@ -134,6 +115,7 @@ function sectorColor(val: number, sessionBest: number, personalBest: number): st
 
 export default function Standings() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const scrollableRef = useRef<HTMLDivElement>(null)
   const playerRowRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(500)
 
@@ -173,7 +155,10 @@ export default function Standings() {
     return map
   }, [allDrivers])
 
-  const sorted = [...vehicles].sort((a: VehicleScoring, b: VehicleScoring) => a.position - b.position)
+  const sorted = useMemo(
+    () => [...vehicles].sort((a: VehicleScoring, b: VehicleScoring) => a.position - b.position),
+    [vehicles],
+  )
   const leader = sorted[0]
 
   const playerPosition = useMemo(
@@ -181,7 +166,14 @@ export default function Standings() {
     [sorted, playerId],
   )
   useEffect(() => {
-    playerRowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const container = scrollableRef.current
+    const row = playerRowRef.current
+    if (!container || !row) return
+    const containerRect = container.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
+    const rowOffsetInContainer = rowRect.top - containerRect.top + container.scrollTop
+    const targetScrollTop = rowOffsetInContainer - container.clientHeight / 2 + rowRect.height / 2
+    container.scrollTo({ top: targetScrollTop, behavior: 'smooth' })
   }, [playerPosition, playerId])
 
   // Compute class positions: rank within each vehicle_class (sorted already by overall position)
@@ -283,7 +275,7 @@ export default function Standings() {
           Waiting for session…
         </div>
       ) : (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div ref={scrollableRef} style={{ flex: 1, overflowY: 'auto' }}>
           {sorted.map((v) => {
             const isPlayer = v.id === playerId
             const vS1 = v.best_sector1
