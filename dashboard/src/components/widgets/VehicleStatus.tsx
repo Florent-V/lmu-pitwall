@@ -111,8 +111,8 @@ function CarDiagram({ dentSeverity, aeroPct, lastImpact, overheating, anyDetache
         <div style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, letterSpacing: 2, textTransform: 'uppercase' }}>
           Body Damage
         </div>
-        <div style={{ fontFamily: fonts.mono, fontSize: 13, color: barColor(overallPct), fontWeight: 700 }}>
-          {overallPct}%
+        <div style={{ fontFamily: fonts.mono, fontSize: 13, color: barColor(displayPct), fontWeight: 700 }}>
+          {displayPct}%
         </div>
       </div>
 

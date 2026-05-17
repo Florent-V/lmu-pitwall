@@ -149,14 +149,14 @@ mod imp {
     pub fn fetch_weather_forecast(session: i32) -> Option<Vec<WeatherForecastNode>> {
         let session_key = match session {
             0..=4 => "PRACTICE",
-            5..=9 => "QUALIFY",
-            _     => "RACE",
+            5..=8 => "QUALIFY",
+            _     => "RACE",  // 9=warmup, 10-13=race → all use RACE forecast
         };
 
         let response = ureq::get(WEATHER_FORECAST_URL)
             .timeout(std::time::Duration::from_secs(2))
             .call()
-            .map_err(|e| tracing::debug!("Weather forecast API unavailable: {}", e))
+            .map_err(|e| tracing::warn!("Weather forecast API unavailable: {}", e))
             .ok()?;
 
         let json: serde_json::Value = response
@@ -164,21 +164,45 @@ mod imp {
             .map_err(|e| tracing::warn!("Weather forecast JSON parse error: {}", e))
             .ok()?;
 
-        let session_data = json.get(session_key)?;
+        tracing::debug!("Weather forecast raw JSON: {}", json);
 
+        // LMU REST API always uses UPPERCASE keys (confirmed against TinyPedal source).
+        let session_data = match json.get(session_key) {
+            Some(d) => d,
+            None => {
+                let available = json.as_object()
+                    .map(|o| o.keys().cloned().collect::<Vec<_>>().join(", "))
+                    .unwrap_or_else(|| "<not a JSON object>".to_string());
+                tracing::warn!(
+                    "Weather forecast: session key '{}' not found. Top-level keys: [{}]",
+                    session_key, available
+                );
+                return None;
+            }
+        };
+
+        // Node names are always UPPERCASE in the LMU REST API (confirmed against TinyPedal source).
         const NODE_NAMES: [&str; 5] = ["START", "NODE_25", "NODE_50", "NODE_75", "FINISH"];
         let nodes: Vec<WeatherForecastNode> = NODE_NAMES.iter()
             .filter_map(|name| {
-                let node = session_data.get(name)?;
-                let sky_type   = node.get("WNV_SKY")?.get("currentValue")?.as_f64()? as i32;
+                let node = session_data.get(*name)?;
+                let sky_type    = node.get("WNV_SKY")?.get("currentValue")?.as_f64()? as i32;
                 let temperature = node.get("WNV_TEMPERATURE")?.get("currentValue")?.as_f64()?;
-                let rain_raw   = node.get("WNV_RAIN_CHANCE")?.get("currentValue")?.as_f64()?;
+                let rain_raw    = node.get("WNV_RAIN_CHANCE")?.get("currentValue")?.as_f64()?;
+                // LMU returns rain chance as a percentage (0–100); normalise to 0.0–1.0.
                 let rain_chance = (rain_raw * 0.01).clamp(0.0, 1.0);
                 Some(WeatherForecastNode { sky_type, temperature, rain_chance })
             })
             .collect();
 
         if nodes.is_empty() {
+            let available = session_data.as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>().join(", "))
+                .unwrap_or_else(|| "<not a JSON object>".to_string());
+            tracing::warn!(
+                "Weather forecast: no nodes parsed for session '{}'. Node-level keys: [{}]",
+                session_key, available
+            );
             return None;
         }
 

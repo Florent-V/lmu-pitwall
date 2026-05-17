@@ -563,7 +563,7 @@ async fn task_polling(
                 state.write().await.wearables = w;
             }
 
-            // --- weather forecast poll (0.033 Hz) ---
+            // --- weather forecast poll (0.2 Hz — every 5 s) ---
             _ = forecast_ticker.tick() => {
                 if reader.is_connected() {
                     let session = state.read().await.scoring

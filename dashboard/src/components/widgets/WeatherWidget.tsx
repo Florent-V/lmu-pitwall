@@ -1,4 +1,4 @@
-import { Sun, CloudSun, Cloud, CloudRain, CloudLightning } from 'lucide-react'
+import { Sun, CloudSun, Cloud, CloudRain, CloudLightning, CloudFog, CloudDrizzle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTelemetryStore } from '../../stores/telemetryStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -13,12 +13,27 @@ import type { WeatherSnapshot } from '../../stores/telemetryStore'
 interface WeatherIconDef { Icon: LucideIcon; color: string }
 
 function resolveWeatherIcon(rainValue: number, skyType?: number): WeatherIconDef {
-  const sky = skyType ?? (rainValue > 0.5 ? 9 : rainValue > 0.2 ? 6 : rainValue > 0.05 ? 3 : 0)
-  if (rainValue > 0.6 || sky >= 9)  return { Icon: CloudLightning, color: '#f97316' }
-  if (rainValue > 0.25 || sky >= 7) return { Icon: CloudRain,      color: '#60a5fa' }
-  if (rainValue > 0.05 || sky >= 5) return { Icon: Cloud,          color: '#9ca3af' }
-  if (sky >= 2)                     return { Icon: CloudSun,        color: '#94a3b8' }
-  return                                   { Icon: Sun,             color: '#facc15' }
+  if (skyType !== undefined && skyType >= 0 && skyType <= 10) {
+    switch (skyType) {
+      case 0:  return { Icon: Sun,            color: '#facc15' }
+      case 1:  return { Icon: CloudSun,       color: '#94a3b8' }
+      case 2:  return { Icon: CloudSun,       color: '#6b7280' }
+      case 3:  return { Icon: Cloud,          color: '#9ca3af' }
+      case 4:  return { Icon: CloudFog,       color: '#9ca3af' }
+      case 5:  return { Icon: CloudDrizzle,   color: '#93c5fd' }
+      case 6:  return { Icon: CloudDrizzle,   color: '#60a5fa' }
+      case 7:  return { Icon: CloudRain,      color: '#60a5fa' }
+      case 8:  return { Icon: CloudRain,      color: '#3b82f6' }
+      case 9:  return { Icon: CloudLightning, color: '#f97316' }
+      case 10: return { Icon: CloudLightning, color: '#ef4444' }
+    }
+  }
+  // Fallback: derive from rain intensity when sky_type is absent or out of range
+  if (rainValue > 0.6)  return { Icon: CloudLightning, color: '#f97316' }
+  if (rainValue > 0.25) return { Icon: CloudRain,      color: '#60a5fa' }
+  if (rainValue > 0.05) return { Icon: Cloud,          color: '#9ca3af' }
+  if (rainValue > 0.01) return { Icon: CloudSun,       color: '#94a3b8' }
+  return                       { Icon: Sun,             color: '#facc15' }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +121,28 @@ function Sparkline({ history, toDisplayTemp }: {
 // Forecast panel
 // ---------------------------------------------------------------------------
 
-const FORECAST_LABELS = ['NOW', '25%', '50%', '75%', 'END']
+// Fractions of session length at which each forecast node is defined (from TinyPedal source).
+// START=0.0, NODE_25=0.2, NODE_50=0.4, NODE_75=0.6, FINISH=0.8
+const NODE_FRACTIONS = [0.0, 0.2, 0.4, 0.6, 0.8]
 
-function ForecastPanel({ nodes, toDisplayTemp, tempLabel }: {
+interface NodeEta {
+  minutes: number       // minutes until this node; negative = already passed
+  laps: number | null   // estimated laps; null = no avg lap time available yet
+}
+
+function formatEta(eta: NodeEta): string {
+  const { minutes, laps } = eta
+  if (minutes < 1) return '< 1 min'
+  const lapStr = laps !== null && laps > 0 ? ` / ${laps} lap` : ''
+  if (minutes >= 60) return `${(minutes / 60).toFixed(1)} h${lapStr}`
+  return `${Math.round(minutes)} min${lapStr}`
+}
+
+function ForecastPanel({ nodes, toDisplayTemp, tempLabel, nodeEta }: {
   nodes: WeatherForecastNode[]
   toDisplayTemp: (c: number) => number
   tempLabel: string
+  nodeEta: NodeEta[]
 }) {
   if (nodes.length === 0) return null
   return (
@@ -122,16 +153,24 @@ function ForecastPanel({ nodes, toDisplayTemp, tempLabel }: {
       }}>Forecast</div>
       <div style={{ display: 'flex', gap: 3 }}>
         {nodes.map((node, i) => {
+          const eta = nodeEta[i]
+          if (i > 0 && eta.minutes <= 0) return null
           const { Icon, color } = resolveWeatherIcon(node.rain_chance, node.sky_type)
           const rainColor = node.rain_chance > 0.5 ? '#60a5fa' : node.rain_chance > 0.2 ? '#93c5fd' : colors.textMuted
+          const isNow = i === 0
+          const label = isNow ? 'NOW' : formatEta(eta)
           return (
             <div key={i} style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              background: '#111', borderRadius: 4, padding: '5px 2px',
-              border: `1px solid ${colors.border}`,
+              background: isNow ? '#1a1a2e' : '#111', borderRadius: 4, padding: '5px 2px',
+              border: `1px solid ${isNow ? colors.accent + '66' : colors.border}`,
             }}>
-              <span style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.textMuted, letterSpacing: 0.5 }}>
-                {FORECAST_LABELS[i] ?? `${i * 25}%`}
+              <span style={{
+                fontFamily: fonts.mono, fontSize: 9,
+                color: isNow ? colors.accent : colors.textMuted,
+                letterSpacing: 0.5, textAlign: 'center', lineHeight: 1.3,
+              }}>
+                {label}
               </span>
               <Icon size={16} color={color} strokeWidth={1.8} />
               <span style={{ fontFamily: fonts.mono, fontSize: 10, color: rainColor, fontWeight: 700 }}>
@@ -169,10 +208,13 @@ function Divider() {
 // ---------------------------------------------------------------------------
 
 export default function WeatherWidget() {
-  const weather        = useTelemetryStore((s) => s.session.weather)
-  const weatherHistory = useTelemetryStore((s) => s.weatherHistory)
-  const toDisplayTemp  = useSettingsStore((s) => s.toDisplayTemp)
-  const tempUnitLabel  = useSettingsStore((s) => s.tempUnitLabel)
+  const weather            = useTelemetryStore((s) => s.session.weather)
+  const weatherHistory     = useTelemetryStore((s) => s.weatherHistory)
+  const scoringSessionTime = useTelemetryStore((s) => s.scoring.session_time)
+  const sessionMinutes     = useTelemetryStore((s) => s.session.session_minutes)
+  const avgLapTime         = useTelemetryStore((s) => s.telemetry.fuel_avg_lap_time)
+  const toDisplayTemp      = useSettingsStore((s) => s.toDisplayTemp)
+  const tempUnitLabel      = useSettingsStore((s) => s.tempUnitLabel)
 
   const airTempC      = weather?.air_temp      ?? 20
   const trackTempC    = weather?.track_temp    ?? 25
@@ -185,9 +227,22 @@ export default function WeatherWidget() {
   const tempLabel = tempUnitLabel()
 
   const { Icon: CurrentIcon, color: iconColor } = resolveWeatherIcon(rainIntensity)
-  const trend   = computeTrend(weatherHistory)
-  const trendCfg = TREND_CONFIG[trend.dominant]
+  const trend      = computeTrend(weatherHistory)
+  const trendCfg   = TREND_CONFIG[trend.dominant]
   const hasHistory = weatherHistory.length >= 3
+
+  // Compute ETA for each forecast node.
+  // Nodes are static for the session; fractions are fixed at [0.0, 0.2, 0.4, 0.6, 0.8].
+  const sessionTotalSeconds = sessionMinutes * 60
+  const nodeEta: NodeEta[] = NODE_FRACTIONS.map(f => {
+    const minutesAway = sessionTotalSeconds > 0
+      ? (f * sessionTotalSeconds - scoringSessionTime) / 60
+      : 999  // session duration unknown → show all
+    const laps = avgLapTime > 0
+      ? Math.round(minutesAway * 60 / avgLapTime)
+      : null
+    return { minutes: minutesAway, laps }
+  })
 
   return (
     <div style={{
@@ -286,7 +341,12 @@ export default function WeatherWidget() {
       {forecast.length > 0 && (
         <>
           <Divider />
-          <ForecastPanel nodes={forecast} toDisplayTemp={toDisplayTemp} tempLabel={tempLabel} />
+          <ForecastPanel
+            nodes={forecast}
+            toDisplayTemp={toDisplayTemp}
+            tempLabel={tempLabel}
+            nodeEta={nodeEta}
+          />
         </>
       )}
     </div>
