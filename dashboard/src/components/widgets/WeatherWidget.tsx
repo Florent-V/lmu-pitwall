@@ -161,24 +161,31 @@ function ForecastPanel({ nodes, toDisplayTemp, tempLabel, nodeEta }: {
           const label = isNow ? 'NOW' : formatEta(eta)
           return (
             <div key={i} style={{
-              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-              background: isNow ? '#1a1a2e' : '#111', borderRadius: 4, padding: '5px 2px',
+              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              background: isNow ? '#1a1a2e' : '#111', borderRadius: 4, padding: '6px 4px',
               border: `1px solid ${isNow ? colors.accent + '66' : colors.border}`,
+              minWidth: 0,
             }}>
+              {/* Label ETA */}
               <span style={{
-                fontFamily: fonts.mono, fontSize: 9,
+                fontFamily: fonts.mono, fontSize: 10,
                 color: isNow ? colors.accent : colors.textMuted,
-                letterSpacing: 0.5, textAlign: 'center', lineHeight: 1.3,
+                letterSpacing: 0.3, textAlign: 'center', lineHeight: 1.3,
+                whiteSpace: 'pre-line',
               }}>
                 {label}
               </span>
-              <Icon size={16} color={color} strokeWidth={1.8} />
-              <span style={{ fontFamily: fonts.mono, fontSize: 10, color: rainColor, fontWeight: 700 }}>
-                {(node.rain_chance * 100).toFixed(0)}%
-              </span>
-              <span style={{ fontFamily: fonts.mono, fontSize: 10, color: '#9ca3af' }}>
-                {toDisplayTemp(node.temperature).toFixed(0)}{tempLabel}
-              </span>
+              {/* Icône seule */}
+              <Icon size={28} color={color} strokeWidth={1.6} />
+              {/* Température + pluie sur la même ligne */}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                <span style={{ fontFamily: fonts.mono, fontSize: 13, color: '#9ca3af', fontWeight: 600 }}>
+                  {toDisplayTemp(node.temperature).toFixed(0)}{tempLabel}
+                </span>
+                <span style={{ fontFamily: fonts.mono, fontSize: 13, color: rainColor, fontWeight: 700 }}>
+                  {(node.rain_chance * 100).toFixed(0)}%
+                </span>
+              </div>
             </div>
           )
         })}
