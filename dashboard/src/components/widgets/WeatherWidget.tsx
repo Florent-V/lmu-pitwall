@@ -40,42 +40,59 @@ function resolveWeatherIcon(rainValue: number, skyType?: number): WeatherIconDef
   return                       { Icon: Sun,             color: '#facc15' }
 }
 
+
 // ---------------------------------------------------------------------------
-// Trend computation from history
+// Wetness state — actual water on track (mAvgPathWetness)
+// WET = static threshold (≥40%), DAMP = stable moderate moisture.
 // ---------------------------------------------------------------------------
 
-type Trend = 'drying' | 'stable' | 'wetting'
+type WetState = 'dry' | 'drying' | 'damp' | 'wetting' | 'wet'
 
-interface TrendResult {
-  track: Trend
-  rain: Trend
-  dominant: Trend
+function computeWetState(history: WeatherSnapshot[]): WetState {
+  const COMPARE_WINDOW = 6
+  const latest = history[history.length - 1]
+  if (!latest) return 'dry'
+  const avg = latest.avg_path_wetness
+  if (avg >= 0.40) return 'wet'
+  if (avg < 0.02)  return 'dry'
+  if (history.length >= COMPARE_WINDOW) {
+    const old   = history[history.length - COMPARE_WINDOW]
+    const delta = avg - old.avg_path_wetness
+    if (delta >  0.03) return 'wetting'
+    if (delta < -0.03) return 'drying'
+  }
+  return 'damp'
 }
 
-function computeTrend(history: WeatherSnapshot[]): TrendResult {
-  const COMPARE_WINDOW = 6   // compare last entry vs ~3 min ago (6 × 30 s)
-  const stable: TrendResult = { track: 'stable', rain: 'stable', dominant: 'stable' }
+const WET_CONFIG: Record<WetState, { label: string; symbol: string; color: string }> = {
+  dry:     { label: 'DRY',     symbol: '○', color: '#facc15' },
+  drying:  { label: 'DRYING',  symbol: '↑', color: '#22c55e' },
+  damp:    { label: 'DAMP',    symbol: '~', color: '#6b7280' },
+  wetting: { label: 'WETTING', symbol: '↓', color: '#60a5fa' },
+  wet:     { label: 'WET',     symbol: '●', color: '#38bdf8' },
+}
 
-  if (history.length < 3) return stable
+// ---------------------------------------------------------------------------
+// Temperature trend — track temp over 90s (grip / rubber / evaporation)
+// ---------------------------------------------------------------------------
 
+type TempTrend = 'warming' | 'stable' | 'cooling'
+
+function computeTempTrend(history: WeatherSnapshot[]): TempTrend {
+  const COMPARE_WINDOW = 6
+  if (history.length < COMPARE_WINDOW) return 'stable'
   const recent = history[history.length - 1]
-  const old    = history[Math.max(0, history.length - COMPARE_WINDOW)]
-
-  const trackDelta = recent.track_temp - old.track_temp
-  const rainDelta  = recent.rain_intensity - old.rain_intensity
-
-  const track: Trend = trackDelta > 0.8 ? 'drying' : trackDelta < -0.8 ? 'wetting' : 'stable'
-  const rain:  Trend = rainDelta  > 0.04 ? 'wetting' : rainDelta < -0.04 ? 'drying'  : 'stable'
-
-  const dominant: Trend = rain !== 'stable' ? rain : track !== 'stable' ? track : 'stable'
-
-  return { track, rain, dominant }
+  const old    = history[history.length - COMPARE_WINDOW]
+  const delta  = recent.track_temp - old.track_temp
+  if (delta >  1.5) return 'warming'
+  if (delta < -1.0) return 'cooling'
+  return 'stable'
 }
 
-const TREND_CONFIG: Record<Trend, { label: string; arrow: string; color: string }> = {
-  drying:  { label: 'DRYING',  arrow: '↑', color: '#22c55e' },
-  stable:  { label: 'STABLE',  arrow: '→', color: '#6b7280' },
-  wetting: { label: 'WETTING', arrow: '↓', color: '#60a5fa' },
+const TEMP_CONFIG: Record<TempTrend, { label: string; symbol: string; color: string }> = {
+  warming: { label: 'WARMING', symbol: '↑', color: '#f97316' },
+  stable:  { label: 'STABLE',  symbol: '→', color: '#6b7280' },
+  cooling: { label: 'COOLING', symbol: '↓', color: '#94a3b8' },
 }
 
 // ---------------------------------------------------------------------------
@@ -308,19 +325,23 @@ export default function WeatherWidget() {
   const tempUnitLabel      = useSettingsStore((s) => s.tempUnitLabel)
   const weatherDetail      = useSettingsStore((s) => s.weatherDetail)
 
-  const airTempC      = weather?.air_temp      ?? 20
-  const trackTempC    = weather?.track_temp    ?? 25
-  const rainIntensity = weather?.rain_intensity ?? 0
-  const forecast      = weather?.forecast      ?? []
+  const airTempC       = weather?.air_temp          ?? 20
+  const trackTempC     = weather?.track_temp        ?? 25
+  const rainIntensity  = weather?.rain_intensity    ?? 0
+  const avgPathWetness = weather?.avg_path_wetness  ?? 0
+  const forecast       = weather?.forecast          ?? []
 
   const airTemp   = toDisplayTemp(airTempC)
   const trackTemp = toDisplayTemp(trackTempC)
   const tempLabel = tempUnitLabel()
 
   const { Icon: CurrentIcon, color: iconColor } = resolveWeatherIcon(rainIntensity)
-  const trend      = computeTrend(weatherHistory)
-  const trendCfg   = TREND_CONFIG[trend.dominant]
   const hasHistory = weatherHistory.length >= 3
+
+  const wetState  = computeWetState(weatherHistory)
+  const tempTrend = computeTempTrend(weatherHistory)
+  const wetCfg    = WET_CONFIG[wetState]
+  const tempCfg   = TEMP_CONFIG[tempTrend]
 
   // Compute ETA for each forecast node based on actual session fractions
   const sessionTotalSeconds = sessionMinutes * 60
@@ -350,48 +371,36 @@ export default function WeatherWidget() {
       boxSizing: 'border-box', overflowY: 'auto',
     }}>
 
-      {/* ── Row 1: icon + rain % + trend badge ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <CurrentIcon size={36} color={iconColor} strokeWidth={1.5} />
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>
-              Rain
-            </span>
-            <span style={{ fontFamily: fonts.mono, fontSize: 20, color: rainIntensity > 0.3 ? '#60a5fa' : colors.textMuted, lineHeight: 1, fontWeight: 700 }}>
-              {(rainIntensity * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div style={{ width: '100%', height: 4, background: '#222', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{
-              width: `${rainIntensity * 100}%`, height: '100%',
-              background: rainIntensity > 0.5 ? '#60a5fa' : rainIntensity > 0.1 ? '#93c5fd' : colors.textMuted,
-              borderRadius: 2, transition: 'width 0.5s, background 0.5s',
-            }} />
-          </div>
+      {/* ── Row 1: icon + rain % + track wet % + wetness badge ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <CurrentIcon size={32} color={iconColor} strokeWidth={1.5} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Rain</span>
+          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: rainIntensity > 0.3 ? '#60a5fa' : colors.textMuted, fontWeight: 700, lineHeight: 1 }}>
+            {(rainIntensity * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
+          </span>
         </div>
-
-        {/* Trend badge */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Track wet</span>
+          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: avgPathWetness > 0.3 ? '#38bdf8' : avgPathWetness > 0.05 ? '#7dd3fc' : colors.textMuted, fontWeight: 700, lineHeight: 1 }}>
+            {(avgPathWetness * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
+          </span>
+        </div>
+        {/* Wetness state badge */}
         <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-          background: `${trendCfg.color}18`,
-          border: `1px solid ${trendCfg.color}55`,
-          borderRadius: 6, padding: '4px 8px', minWidth: 58, flexShrink: 0,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0,
+          background: `${wetCfg.color}18`, border: `1px solid ${wetCfg.color}55`,
+          borderRadius: 6, padding: '4px 8px', minWidth: 58,
         }}>
-          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: trendCfg.color, lineHeight: 1, fontWeight: 700 }}>
-            {trendCfg.arrow}
-          </span>
-          <span style={{ fontFamily: fonts.body, fontSize: 9, color: trendCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>
-            {trendCfg.label}
-          </span>
+          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: wetCfg.color, lineHeight: 1, fontWeight: 700 }}>{wetCfg.symbol}</span>
+          <span style={{ fontFamily: fonts.body, fontSize: 9, color: wetCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>{wetCfg.label}</span>
         </div>
       </div>
 
       <Divider />
 
-      {/* ── Row 2: temperatures + cloud ── */}
-      <div style={{ display: 'flex', gap: 6 }}>
+      {/* ── Row 2: temperatures + cloud + temp trend badge ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Air</span>
           <span style={{ fontFamily: fonts.mono, fontSize: 18, color: tempColor(airTempC, false), fontWeight: 700, lineHeight: 1 }}>
@@ -409,6 +418,15 @@ export default function WeatherWidget() {
           <span style={{ fontFamily: fonts.mono, fontSize: 18, color: cloudiness > 0.6 ? '#9ca3af' : '#facc15', fontWeight: 700, lineHeight: 1 }}>
             {(cloudiness * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
           </span>
+        </div>
+        {/* Temperature trend badge */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0,
+          background: `${tempCfg.color}18`, border: `1px solid ${tempCfg.color}55`,
+          borderRadius: 6, padding: '4px 8px', minWidth: 58,
+        }}>
+          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: tempCfg.color, lineHeight: 1, fontWeight: 700 }}>{tempCfg.symbol}</span>
+          <span style={{ fontFamily: fonts.body, fontSize: 9, color: tempCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>{tempCfg.label}</span>
         </div>
       </div>
 
