@@ -40,43 +40,6 @@ function resolveWeatherIcon(rainValue: number, skyType?: number): WeatherIconDef
   return                       { Icon: Sun,             color: '#facc15' }
 }
 
-// ---------------------------------------------------------------------------
-// Trend computation from history
-// ---------------------------------------------------------------------------
-
-type Trend = 'drying' | 'stable' | 'wetting'
-
-interface TrendResult {
-  track: Trend
-  rain: Trend
-  dominant: Trend
-}
-
-function computeTrend(history: WeatherSnapshot[]): TrendResult {
-  const COMPARE_WINDOW = 6   // compare last entry vs ~3 min ago (6 × 30 s)
-  const stable: TrendResult = { track: 'stable', rain: 'stable', dominant: 'stable' }
-
-  if (history.length < 3) return stable
-
-  const recent = history[history.length - 1]
-  const old    = history[Math.max(0, history.length - COMPARE_WINDOW)]
-
-  const trackDelta = recent.track_temp - old.track_temp
-  const rainDelta  = recent.rain_intensity - old.rain_intensity
-
-  const track: Trend = trackDelta > 0.8 ? 'drying' : trackDelta < -0.8 ? 'wetting' : 'stable'
-  const rain:  Trend = rainDelta  > 0.04 ? 'wetting' : rainDelta < -0.04 ? 'drying'  : 'stable'
-
-  const dominant: Trend = rain !== 'stable' ? rain : track !== 'stable' ? track : 'stable'
-
-  return { track, rain, dominant }
-}
-
-const TREND_CONFIG: Record<Trend, { label: string; arrow: string; color: string }> = {
-  drying:  { label: 'DRYING',  arrow: '↑', color: '#22c55e' },
-  stable:  { label: 'STABLE',  arrow: '→', color: '#6b7280' },
-  wetting: { label: 'WETTING', arrow: '↓', color: '#60a5fa' },
-}
 
 // ---------------------------------------------------------------------------
 // Wetness state — actual water on track (mAvgPathWetness)
@@ -373,8 +336,6 @@ export default function WeatherWidget() {
   const tempLabel = tempUnitLabel()
 
   const { Icon: CurrentIcon, color: iconColor } = resolveWeatherIcon(rainIntensity)
-  const trend      = computeTrend(weatherHistory)
-  const trendCfg   = TREND_CONFIG[trend.dominant]
   const hasHistory = weatherHistory.length >= 3
 
   const wetState  = computeWetState(weatherHistory)
