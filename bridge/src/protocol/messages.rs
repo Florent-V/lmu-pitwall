@@ -23,10 +23,27 @@ pub struct TireData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherForecastNode {
+    pub sky_type: i32,      // 0=clear … 10=heavy rain
+    pub temperature: f64,   // Celsius
+    pub rain_chance: f64,   // 0.0–1.0
+    // Optional fields parsed from REST API — not yet displayed in the widget
+    pub humidity: Option<f64>,        // relative humidity 0–100 %
+    pub wind_direction: Option<i32>,  // 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+    pub wind_speed: Option<f64>,      // wind speed m/s
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeatherData {
     pub air_temp: f64,
     pub track_temp: f64,
     pub rain_intensity: f64,
+    pub dark_cloud: f64,        // cloud coverage 0.0–1.0 (mDarkCloud) — unreliable in LMU
+    /// Cloud coverage 0.0–1.0 derived from REST API sky_type; more reliable than dark_cloud.
+    pub cloudiness: f64,
+    /// 5 forecast nodes: 0%, 25%, 50%, 75%, 100% of session length.
+    /// Empty when LMU REST API is unavailable.
+    pub forecast: Vec<WeatherForecastNode>,
 }
 
 /// Tire snapshot for one wheel at S/F line crossing (telemetry at lap completion).

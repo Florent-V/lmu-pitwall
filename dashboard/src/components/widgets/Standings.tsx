@@ -135,6 +135,7 @@ export default function Standings() {
   const settingShowCompound = useSettingsStore((s) => s.standingsShowCompound)
   const settingShowCarType  = useSettingsStore((s) => s.standingsShowCarType)
   const settingShowVE       = useSettingsStore((s) => s.standingsShowVE)
+  const settingShowDamage   = useSettingsStore((s) => s.standingsShowDamage)
 
   const isRace = sessionType?.toLowerCase().includes('race') ?? false
 
@@ -206,7 +207,7 @@ export default function Standings() {
     }
     return map
   }, [allDrivers])
-  const hasDamageData = [...damageById.values()].some(s => s.some(v => v > 0))
+  const hasDamageData = settingShowDamage && [...damageById.values()].some(s => s.some(v => v > 0))
 
   // Session best per sector and lap (minimum across all vehicles with valid data)
   const validNums = (arr: number[]) => arr.filter((x) => x > 0)
@@ -220,6 +221,7 @@ export default function Standings() {
   const W_NUM  = 40   // "#99"
   const W_SEC  = 58   // "88.888"
   const W_LAP  = 76   // "1:28.888"
+  const W_LAST = 76   // "1:28.888"
   const W_GAP  = 72   // "+128.888"
   const W_VE   = 52   // "100%"
   const W_COMP = 52   // "Medium"
@@ -263,6 +265,7 @@ export default function Standings() {
           {colHdr('S2', W_SEC)}
           {colHdr('S3', W_SEC)}
           {colHdr('BEST LAP', W_LAP)}
+          {colHdr('LAST LAP', W_LAST)}
           {colHdr('GAP', W_GAP)}
         </div>
       )}
@@ -391,6 +394,15 @@ export default function Standings() {
                   width: W_LAP, textAlign: 'right', flexShrink: 0,
                 }}>
                   {fmtLap(v.best_lap_time)}
+                </span>
+
+                {/* Last lap time */}
+                <span style={{
+                  fontFamily: fonts.mono, fontSize: 13,
+                  color: colors.textMuted,
+                  width: W_LAST, textAlign: 'right', flexShrink: 0,
+                }}>
+                  {fmtLap(v.last_lap_time)}
                 </span>
 
                 {/* Gap to leader */}

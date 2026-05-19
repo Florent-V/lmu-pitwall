@@ -24,6 +24,14 @@ export interface LapEntry {
   s3: number         // S3 individual seconds; -1 = invalid
 }
 
+export interface WeatherSnapshot {
+  ts: number           // Date.now() — wall clock ms
+  rain_intensity: number
+  track_temp: number
+  air_temp: number
+  dark_cloud: number
+}
+
 // ---------------------------------------------------------------------------
 // State sections
 // ---------------------------------------------------------------------------
@@ -113,7 +121,9 @@ interface TelemetryStore {
   connection: ConnectionSection
   versionInfo: VersionInfoSection
   lapHistory: LapEntry[]
+  weatherHistory: WeatherSnapshot[]
   _lapTracking: { prevTotalLaps: number; prevPlayerId: number }
+  _weatherSessionKey: string
 
   // Actions
   setConnection: (status: ConnectionStatus) => void
@@ -271,7 +281,9 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
   connection: defaultConnection,
   versionInfo: null,
   lapHistory: [],
+  weatherHistory: [],
   _lapTracking: { prevTotalLaps: -1, prevPlayerId: -1 },
+  _weatherSessionKey: '',
 
   setConnection: (status) =>
     set((state) => ({
@@ -363,14 +375,40 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
         break
 
       case 'SessionInfo':
-        set({
-          session: {
-            track_name: msg.track_name,
-            track_length: msg.track_length,
-            weather: msg.weather,
-            session_laps: msg.session_laps,
-            session_minutes: msg.session_minutes,
-          },
+        set((state) => {
+          // Detect session change — clear weather history to avoid cross-session trend pollution
+          const sessionKey = `${msg.track_name}|${msg.session_laps}|${msg.session_minutes}`
+          const sessionChanged = state._weatherSessionKey !== '' && sessionKey !== state._weatherSessionKey
+
+          // Sample weather history at most once every 30 s (max 40 entries = 20 min)
+          const SAMPLE_INTERVAL_MS = 30_000
+          const MAX_HISTORY = 40
+          let weatherHistory = sessionChanged ? [] : state.weatherHistory
+          if (msg.weather) {
+            const now = Date.now()
+            const last = weatherHistory[weatherHistory.length - 1]
+            if (!last || now - last.ts >= SAMPLE_INTERVAL_MS) {
+              const snap: WeatherSnapshot = {
+                ts: now,
+                rain_intensity: msg.weather.rain_intensity,
+                track_temp:     msg.weather.track_temp,
+                air_temp:       msg.weather.air_temp,
+                dark_cloud:     msg.weather.dark_cloud,
+              }
+              weatherHistory = [...weatherHistory, snap].slice(-MAX_HISTORY)
+            }
+          }
+          return {
+            session: {
+              track_name:      msg.track_name,
+              track_length:    msg.track_length,
+              weather:         msg.weather,
+              session_laps:    msg.session_laps,
+              session_minutes: msg.session_minutes,
+            },
+            weatherHistory,
+            _weatherSessionKey: sessionKey,
+          }
         })
         break
 
