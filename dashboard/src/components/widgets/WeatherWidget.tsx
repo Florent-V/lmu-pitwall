@@ -300,7 +300,6 @@ export default function WeatherWidget() {
   const rainIntensity    = weather?.rain_intensity    ?? 0
   const darkCloud        = weather?.dark_cloud        ?? 0
   const avgPathWetness   = weather?.avg_path_wetness  ?? 0
-  const maxPathWetness   = weather?.max_path_wetness  ?? 0
   const forecast         = weather?.forecast          ?? []
 
   const airTemp   = toDisplayTemp(airTempC)
@@ -335,116 +334,54 @@ export default function WeatherWidget() {
       boxSizing: 'border-box', overflowY: 'auto',
     }}>
 
-      {/* ── Row 1: icon + rain % + trend badge ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <CurrentIcon size={36} color={iconColor} strokeWidth={1.5} />
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {/* Rain intensity bar */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-              <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                Rain
-              </span>
-              <span style={{ fontFamily: fonts.mono, fontSize: 18, color: rainIntensity > 0.3 ? '#60a5fa' : colors.textMuted, lineHeight: 1, fontWeight: 700 }}>
-                {(rainIntensity * 100).toFixed(0)}%
-              </span>
-            </div>
-            <div style={{ width: '100%', height: 4, background: '#222', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{
-                width: `${rainIntensity * 100}%`, height: '100%',
-                background: rainIntensity > 0.5 ? '#60a5fa' : rainIntensity > 0.1 ? '#93c5fd' : colors.textMuted,
-                borderRadius: 2, transition: 'width 0.5s, background 0.5s',
-              }} />
-            </div>
-          </div>
-          {/* Track wetness bar — actual water on surface */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-              <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                Track wet
-              </span>
-              <span style={{ fontFamily: fonts.mono, fontSize: 18, color: avgPathWetness > 0.3 ? '#38bdf8' : avgPathWetness > 0.05 ? '#7dd3fc' : colors.textMuted, lineHeight: 1, fontWeight: 700 }}>
-                {(avgPathWetness * 100).toFixed(0)}%
-                {maxPathWetness > avgPathWetness + 0.05 && (
-                  <span style={{ fontSize: 11, fontWeight: 400, color: colors.textMuted }}>
-                    {' '}(max {(maxPathWetness * 100).toFixed(0)}%)
-                  </span>
-                )}
-              </span>
-            </div>
-            <div style={{ width: '100%', height: 4, background: '#222', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{
-                width: `${avgPathWetness * 100}%`, height: '100%',
-                background: avgPathWetness > 0.5 ? '#38bdf8' : avgPathWetness > 0.1 ? '#7dd3fc' : '#475569',
-                borderRadius: 2, transition: 'width 0.5s, background 0.5s',
-              }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Two stacked badges: wetness state + temperature trend */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
-          {/* Wetness badge */}
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-            background: `${wetCfg.color}18`, border: `1px solid ${wetCfg.color}55`,
-            borderRadius: 5, padding: '3px 7px', minWidth: 60,
-          }}>
-            <span style={{ fontFamily: fonts.mono, fontSize: 16, color: wetCfg.color, lineHeight: 1, fontWeight: 700 }}>
-              {wetCfg.symbol}
-            </span>
-            <span style={{ fontFamily: fonts.body, fontSize: 8, color: wetCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>
-              {wetCfg.label}
-            </span>
-          </div>
-          {/* Temperature trend badge */}
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-            background: `${tempCfg.color}18`, border: `1px solid ${tempCfg.color}55`,
-            borderRadius: 5, padding: '3px 7px', minWidth: 60,
-          }}>
-            <span style={{ fontFamily: fonts.mono, fontSize: 16, color: tempCfg.color, lineHeight: 1, fontWeight: 700 }}>
-              {tempCfg.symbol}
-            </span>
-            <span style={{ fontFamily: fonts.body, fontSize: 8, color: tempCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>
-              {tempCfg.label}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <Divider />
-
-      {/* ── Row 2: temperatures ── */}
-      <div style={{ display: 'flex', gap: 6 }}>
-        {/* Air */}
+      {/* ── Row 1: temperatures + temp trend badge ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Air</span>
           <span style={{ fontFamily: fonts.mono, fontSize: 18, color: tempColor(airTempC, false), fontWeight: 700, lineHeight: 1 }}>
             {airTemp.toFixed(1)}<span style={{ fontSize: 12, fontWeight: 400 }}>{tempLabel}</span>
           </span>
         </div>
-        {/* Track */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Track</span>
           <span style={{ fontFamily: fonts.mono, fontSize: 18, color: tempColor(trackTempC, true), fontWeight: 700, lineHeight: 1 }}>
             {trackTemp.toFixed(1)}<span style={{ fontSize: 12, fontWeight: 400 }}>{tempLabel}</span>
           </span>
         </div>
-        {/* Cloud coverage */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Cloud</span>
-          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: darkCloud > 0.6 ? '#9ca3af' : '#facc15', fontWeight: 700, lineHeight: 1 }}>
-            {(darkCloud * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0,
+          background: `${tempCfg.color}18`, border: `1px solid ${tempCfg.color}55`,
+          borderRadius: 5, padding: '3px 7px', minWidth: 60,
+        }}>
+          <span style={{ fontFamily: fonts.mono, fontSize: 16, color: tempCfg.color, lineHeight: 1, fontWeight: 700 }}>{tempCfg.symbol}</span>
+          <span style={{ fontFamily: fonts.body, fontSize: 8, color: tempCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>{tempCfg.label}</span>
+        </div>
+      </div>
+
+      <Divider />
+
+      {/* ── Row 2: icon + rain % + track wet % + wetness badge ── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <CurrentIcon size={32} color={iconColor} strokeWidth={1.5} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Rain</span>
+          <span style={{ fontFamily: fonts.mono, fontSize: 18, color: rainIntensity > 0.3 ? '#60a5fa' : colors.textMuted, fontWeight: 700, lineHeight: 1 }}>
+            {(rainIntensity * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
           </span>
         </div>
-        {/* Track wetness summary */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Wet</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+          <span style={{ fontFamily: fonts.body, fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Track wet</span>
           <span style={{ fontFamily: fonts.mono, fontSize: 18, color: avgPathWetness > 0.3 ? '#38bdf8' : avgPathWetness > 0.05 ? '#7dd3fc' : colors.textMuted, fontWeight: 700, lineHeight: 1 }}>
             {(avgPathWetness * 100).toFixed(0)}<span style={{ fontSize: 12, fontWeight: 400 }}>%</span>
           </span>
+        </div>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0,
+          background: `${wetCfg.color}18`, border: `1px solid ${wetCfg.color}55`,
+          borderRadius: 5, padding: '3px 7px', minWidth: 60,
+        }}>
+          <span style={{ fontFamily: fonts.mono, fontSize: 16, color: wetCfg.color, lineHeight: 1, fontWeight: 700 }}>{wetCfg.symbol}</span>
+          <span style={{ fontFamily: fonts.body, fontSize: 8, color: wetCfg.color, letterSpacing: 1, textTransform: 'uppercase' }}>{wetCfg.label}</span>
         </div>
       </div>
 
