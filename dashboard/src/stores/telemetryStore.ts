@@ -124,6 +124,7 @@ interface TelemetryStore {
   lapHistory: LapEntry[]
   weatherHistory: WeatherSnapshot[]
   _lapTracking: { prevTotalLaps: number; prevPlayerId: number }
+  _weatherSessionKey: string
 
   // Actions
   setConnection: (status: ConnectionStatus) => void
@@ -283,6 +284,7 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
   lapHistory: [],
   weatherHistory: [],
   _lapTracking: { prevTotalLaps: -1, prevPlayerId: -1 },
+  _weatherSessionKey: '',
 
   setConnection: (status) =>
     set((state) => ({
@@ -375,20 +377,24 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
 
       case 'SessionInfo':
         set((state) => {
-          // Sample weather history at most once every 15 s (max 80 entries = 20 min)
-          const SAMPLE_INTERVAL_MS = 15_000
-          const MAX_HISTORY = 80
-          let weatherHistory = state.weatherHistory
+          // Detect session change — clear weather history to avoid cross-session trend pollution
+          const sessionKey = `${msg.track_name}|${msg.session_laps}|${msg.session_minutes}`
+          const sessionChanged = state._weatherSessionKey !== '' && sessionKey !== state._weatherSessionKey
+
+          // Sample weather history at most once every 30 s (max 40 entries = 20 min)
+          const SAMPLE_INTERVAL_MS = 30_000
+          const MAX_HISTORY = 40
+          let weatherHistory = sessionChanged ? [] : state.weatherHistory
           if (msg.weather) {
             const now = Date.now()
             const last = weatherHistory[weatherHistory.length - 1]
             if (!last || now - last.ts >= SAMPLE_INTERVAL_MS) {
               const snap: WeatherSnapshot = {
                 ts: now,
-                rain_intensity:    msg.weather.rain_intensity,
-                track_temp:        msg.weather.track_temp,
-                air_temp:          msg.weather.air_temp,
-                dark_cloud:        msg.weather.dark_cloud,
+                rain_intensity: msg.weather.rain_intensity,
+                track_temp:     msg.weather.track_temp,
+                air_temp:       msg.weather.air_temp,
+                dark_cloud:     msg.weather.dark_cloud,
                 avg_path_wetness:  msg.weather.avg_path_wetness,
               }
               weatherHistory = [...weatherHistory, snap].slice(-MAX_HISTORY)
@@ -403,6 +409,7 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
               session_minutes: msg.session_minutes,
             },
             weatherHistory,
+            _weatherSessionKey: sessionKey,
           }
         })
         break

@@ -21,6 +21,10 @@ export interface WeatherForecastNode {
   sky_type: number      // 0=clear … 10=heavy rain
   temperature: number   // Celsius
   rain_chance: number   // 0.0–1.0
+  // Optional — parsed from REST API, not yet displayed in widget
+  humidity?: number        // 0–100 %
+  wind_direction?: number  // 0=N, 1=NE, 2=E, 3=SE, 4=S, 5=SW, 6=W, 7=NW
+  wind_speed?: number      // m/s
 }
 
 export interface WeatherData {
@@ -31,6 +35,7 @@ export interface WeatherData {
   avg_path_wetness: number    // actual water on racing line 0.0–1.0 (mAvgPathWetness)
   min_path_wetness: number    // minimum wetness on racing line
   max_path_wetness: number    // maximum wetness on racing line
+  cloudiness: number      // 0.0–1.0 derived from REST API sky_type (reliable)
   forecast: WeatherForecastNode[]
 }
 
