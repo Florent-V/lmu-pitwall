@@ -231,6 +231,9 @@ fn build_scoring_update(sc: &rF2ScoringBuffer, tel: Option<&rF2TelemetryBuffer>)
                 time_behind_leader: v.mTimeBehindLeader,
                 laps_behind_leader: v.mLapsBehindLeader,
                 virtual_energy: *ve_map.get(&v.mID).unwrap_or(&0.0),
+                flag: v.mFlag,
+                num_penalties: v.mNumPenalties as i32,
+                num_pitstops: v.mNumPitstops as i32,
             }
         })
         .collect();
