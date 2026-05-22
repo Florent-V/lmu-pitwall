@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react'
 import { useTelemetryStore } from '../../stores/telemetryStore'
 import { colors, fonts } from '../../styles/theme'
 
@@ -94,6 +95,22 @@ export default function LapTiming() {
   const bestS2Only = (bestS2Full > 0 && bestS1 > 0) ? bestS2Full - bestS1 : -1
   const bestS3 = (bestLap > 0 && bestS2Full > 0) ? bestLap - bestS2Full : -1
 
+  // S3 freeze: affiche S3 du tour terminé pendant 5s avant de passer au nouveau tour
+  const [frozenS3, setFrozenS3] = useState(-1)
+  const prevTotalLaps = useRef(-1)
+
+  useEffect(() => {
+    if (prevTotalLaps.current !== -1 && totalLaps > prevTotalLaps.current && lastS3 > 0) {
+      const s3 = lastS3
+      // Différer le setState pour éviter les cascades synchrones dans l'effet
+      const t0 = setTimeout(() => setFrozenS3(s3), 0)
+      const t1 = setTimeout(() => setFrozenS3(-1), 5000)
+      prevTotalLaps.current = totalLaps
+      return () => { clearTimeout(t0); clearTimeout(t1) }
+    }
+    prevTotalLaps.current = totalLaps
+  }, [totalLaps, lastS3])
+
   return (
     <div style={{
       width: '100%',
@@ -133,7 +150,7 @@ export default function LapTiming() {
         </span>
         <SectorRow label="S1" time={curS1}   bestTime={bestS1} />
         <SectorRow label="S2" time={curS2Only > 0 ? curS2Only : -1} bestTime={bestS2Only} />
-        <SectorRow label="S3" time={-1}       bestTime={bestS3} />
+        <SectorRow label="S3" time={frozenS3} bestTime={bestS3} />
       </div>
 
       {/* Last lap */}
