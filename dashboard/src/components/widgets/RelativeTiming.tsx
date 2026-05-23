@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { useTelemetryStore } from '../../stores/telemetryStore'
 import { colors, fonts } from '../../styles/theme'
 
@@ -21,31 +21,29 @@ function fmtDelta(delta: number): string {
     return `${sign}${delta.toFixed(3)}`
 }
 
-/** delta > 0 = car moving away from player.
- *  Ahead car moving away = bad (red). Behind car moving away = good (green). */
+/**
+ * delta semantics: positive = the car is moving AWAY from player.
+ *   Ahead + moving away  → bad  → red
+ *   Behind + moving away → good → green
+ */
 function deltaColor(delta: number, isAhead: boolean): string {
     if (Math.abs(delta) < 0.001) return colors.textMuted
     if (isAhead) return delta > 0 ? '#ef4444' : '#22c55e'
     return delta > 0 ? '#22c55e' : '#ef4444'
 }
 
-interface SectorState {
-    /** Sector key that triggered this snapshot */
+// ── Sector snapshot stored in a ref — no extra re-render on sector change ─────
+interface SectorRef {
     key: string
-    /** Gap to each vehicle (by id) at the last sector boundary */
     gaps: Map<number, number>
-    /** Computed display data per vehicle: frozen gap + delta vs previous sector */
-    display: Map<number, { gap: number; delta: number | null; isAhead: boolean }>
+    display: Map<number, { delta: number | null }>
 }
-
-const emptySectorState: SectorState = { key: '', gaps: new Map(), display: new Map() }
 
 export default function RelativeTiming() {
     const vehicles = useTelemetryStore((s) => s.scoring.vehicles)
     const playerId = useTelemetryStore((s) => s.scoring.player_vehicle_id)
 
-    // ── Sector snapshot state (updated with setState-during-render pattern) ──
-    const [sectorState, setSectorState] = useState<SectorState>(emptySectorState)
+    const sectorRef = useRef<SectorRef>({ key: '', gaps: new Map(), display: new Map() })
 
     const player = useMemo(
         () => vehicles.find((v) => v.id === playerId),
@@ -69,54 +67,86 @@ export default function RelativeTiming() {
         const playerIndex = sameClassSorted.findIndex((v) => v.id === playerId)
         if (playerIndex === -1) return []
         const from = Math.max(0, playerIndex - WINDOW)
-        const to = Math.min(sameClassSorted.length - 1, playerIndex + WINDOW)
+        const to   = Math.min(sameClassSorted.length - 1, playerIndex + WINDOW)
         return sameClassSorted.slice(from, to + 1)
     }, [sameClassSorted, playerId])
 
+    const laptimeEst = useMemo(() => {
+        if (!player) return 0
+        return player.estimated_lap_time > 0 ? player.estimated_lap_time
+             : player.best_lap_time > 0      ? player.best_lap_time
+             : player.last_lap_time > 0      ? player.last_lap_time : 0
+    }, [player])
+
+    // ── Live gap via time_behind_leader ────────────────────────────────────────
+    // gap > 0: v is AHEAD of player (v is closer to the overall leader).
+    // gap < 0: v is BEHIND player.
+    //
+    // Using time_behind_leader diff rather than the time_into_lap modulo avoids
+    // two problems: (1) the S/F transient that triggered false "+1 L" displays
+    // when cars separated by >15% of lap time crossed the line; (2) multi-class
+    // contamination — the leader component cancels out for same-class cars.
+    //
+    // "+N L" / "-N L" is shown only when |gap| > 85% of lap time, meaning the
+    // car is genuinely a full lap (or more) down/up in class.
     const enriched = useMemo(() => {
         if (!player) return []
+
         return rows.map((v) => {
             const isPlayer = v.id === playerId
-            // positive gap = v is ahead, negative gap = v is behind
-            const gap = isPlayer ? 0 : player.time_behind_leader - v.time_behind_leader
-            // lap difference: positive = v is behind player, negative = v is ahead
-            const lapDiff = isPlayer ? 0 : v.laps_behind_leader - player.laps_behind_leader
-            return { v, gap, isPlayer, lapDiff }
-        })
-    }, [rows, player, playerId])
 
-    // ── Detect sector crossing and update snapshot (setState-during-render) ──
-    // React re-renders immediately with the new state, discarding this output.
+            let gap = 0
+            let showLapDiff = false
+            let lapCount = 0
+
+            if (!isPlayer) {
+                // positive = v is ahead (v has smaller time_behind_leader)
+                gap = player.time_behind_leader - v.time_behind_leader
+
+                if (laptimeEst > 0 && Math.abs(gap) > laptimeEst * 0.85) {
+                    showLapDiff = true
+                    // gap > 0 → v laps player → v is N laps ahead → "-N L"
+                    // gap < 0 → player laps v → v is N laps behind → "+N L"
+                    lapCount = Math.round(gap / laptimeEst)
+                }
+            }
+
+            return { v, gap, isPlayer, showLapDiff, lapCount }
+        })
+    }, [rows, player, playerId, laptimeEst])
+
+    // ── Sector snapshot — ΔSECT only ──────────────────────────────────────────
+    // Mutate the ref directly: no setSomething, no extra render per sector.
     if (player) {
         const sectorKey = `${player.total_laps}|${player.cur_sector1 > 0 ? '1' : 'x'}|${player.cur_sector2 > 0 ? '1' : 'x'}`
+        const ref = sectorRef.current
 
-        if (sectorKey !== sectorState.key) {
-            const isFirst = sectorState.key === ''
-            const newGaps = new Map<number, number>()
-            const newDisplay = new Map<number, { gap: number; delta: number | null; isAhead: boolean }>()
+        if (sectorKey !== ref.key) {
+            const isFirst = ref.key === ''
+            const newGaps: Map<number, number> = new Map()
+            const newDisplay: Map<number, { delta: number | null }> = new Map()
 
-            for (const { v, gap, isPlayer, lapDiff } of enriched) {
+            for (const { v, gap, isPlayer } of enriched) {
                 if (isPlayer) continue
                 newGaps.set(v.id, gap)
 
-                // Only compute time-based delta when both cars are on the same lap
-                const isAhead = lapDiff < 0 || (lapDiff === 0 && gap > 0)
                 let delta: number | null = null
-
-                if (!isFirst && lapDiff === 0) {
-                    const prevGap = sectorState.gaps.get(v.id)
+                if (!isFirst) {
+                    const prevGap = ref.gaps.get(v.id)
                     if (prevGap !== undefined) {
                         const rawDelta = gap - prevGap
+                        // Normalise: positive delta = car moving AWAY from player.
+                        const isAhead = gap > 0
                         delta = isAhead ? rawDelta : -rawDelta
                     }
                 }
-                newDisplay.set(v.id, { gap, delta, isAhead })
+                newDisplay.set(v.id, { delta })
             }
-
-            setSectorState({ key: sectorKey, gaps: newGaps, display: newDisplay })
+            sectorRef.current = { key: sectorKey, gaps: newGaps, display: newDisplay }
         }
     }
 
+    // ── Render ───────────────────────────────────────────────────────────────
     if (!player || enriched.length === 0) {
         return (
             <div style={{
@@ -133,7 +163,7 @@ export default function RelativeTiming() {
     const W_NUM   = 36
     const W_LAST  = 76
     const W_GAP   = 80
-    const W_DELTA = 72
+    const W_DELTA = 68
 
     const colHdr = (label: string, width: number, right = false) => (
         <span style={{
@@ -159,7 +189,7 @@ export default function RelativeTiming() {
                 </span>
             </div>
 
-            {/* Column header row */}
+            {/* Column headers */}
             <div style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 padding: '0 6px 3px', marginBottom: 2,
@@ -173,22 +203,22 @@ export default function RelativeTiming() {
                 {colHdr('ΔSECT', W_DELTA, true)}
             </div>
 
-            {/* Rows centered vertically */}
+            {/* Rows */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
-                {enriched.map(({ v, gap, isPlayer, lapDiff }) => {
-                    const sd = sectorState.display.get(v.id)
-                    // Use sector-frozen gap when available; fall back to live gap before first snapshot
-                    const displayedGap = isPlayer ? 0 : (sd?.gap ?? gap)
-                    const delta = (lapDiff === 0 ? sd?.delta : null) ?? null
-                    const isAhead = displayedGap > 0
+                {enriched.map(({ v, gap, isPlayer, showLapDiff, lapCount }) => {
+                    const sd = sectorRef.current.display.get(v.id)
+                    const delta = sd?.delta ?? null
+                    const isAhead = gap > 0
 
-                    // Gap label: show lap count when on different laps, seconds otherwise
                     function gapLabel(): string {
                         if (isPlayer) return '—'
-                        if (lapDiff > 0) return `+${lapDiff} L`
-                        if (lapDiff < 0) return `${lapDiff} L`
-                        return fmtGap(displayedGap)
+                        if (showLapDiff) return lapCount > 0 ? `-${lapCount} L` : `+${Math.abs(lapCount)} L`
+                        return fmtGap(gap)
                     }
+
+                    const gapColor = isPlayer   ? colors.textMuted
+                        : showLapDiff           ? '#a855f7'
+                        :                         colors.text
 
                     return (
                         <div key={v.id} style={{
@@ -197,17 +227,14 @@ export default function RelativeTiming() {
                             background: isPlayer ? `${colors.primary}18` : 'transparent',
                             borderLeft: isPlayer ? `2px solid ${colors.primary}` : '2px solid transparent',
                         }}>
-                            {/* Class position */}
                             <span style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.textMuted, width: W_POS, flexShrink: 0 }}>
                                 P{classPos.get(v.id) ?? v.position}
                             </span>
 
-                            {/* Car number */}
                             <span style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.primary, width: W_NUM, textAlign: 'right', flexShrink: 0 }}>
                                 #{v.car_number}
                             </span>
 
-                            {/* Driver name */}
                             <span style={{
                                 fontFamily: fonts.body, fontSize: 15,
                                 color: isPlayer ? colors.primary : colors.text,
@@ -216,7 +243,6 @@ export default function RelativeTiming() {
                                 {isPlayer ? `★ ${v.driver_name || `Car #${v.id}`}` : (v.driver_name || `Car #${v.id}`)}
                             </span>
 
-                            {/* PIT badge */}
                             {v.in_pits && (
                                 <span style={{
                                     fontFamily: fonts.mono, fontSize: 10, fontWeight: 700,
@@ -225,7 +251,6 @@ export default function RelativeTiming() {
                                 }}>PIT</span>
                             )}
 
-                            {/* Last lap time */}
                             <span style={{
                                 fontFamily: fonts.mono, fontSize: 13, color: colors.textMuted,
                                 width: W_LAST, textAlign: 'right', flexShrink: 0,
@@ -233,16 +258,16 @@ export default function RelativeTiming() {
                                 {fmtLap(v.last_lap_time)}
                             </span>
 
-                            {/* Gap frozen at last sector crossing */}
+                            {/* GAP — live, continuous via time_behind_leader diff */}
                             <span style={{
-                                fontFamily: fonts.mono, fontSize: 13,
-                                color: lapDiff !== 0 ? '#a855f7' : colors.textMuted,
+                                fontFamily: fonts.mono, fontSize: 13, fontWeight: 600,
+                                color: gapColor,
                                 width: W_GAP, textAlign: 'right', flexShrink: 0,
                             }}>
                                 {gapLabel()}
                             </span>
 
-                            {/* Sector delta: green/red depending on position (ahead/behind) */}
+                            {/* ΔSECT — frozen at sector boundaries */}
                             <span style={{
                                 fontFamily: fonts.mono, fontSize: 13, fontWeight: 600,
                                 color: (isPlayer || delta === null) ? colors.textMuted : deltaColor(delta, isAhead),

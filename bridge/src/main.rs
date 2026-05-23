@@ -230,6 +230,8 @@ fn build_scoring_update(sc: &rF2ScoringBuffer, tel: Option<&rF2TelemetryBuffer>)
                 pos_z: v.mPos.z,
                 time_behind_leader: v.mTimeBehindLeader,
                 laps_behind_leader: v.mLapsBehindLeader,
+                time_into_lap:      v.mTimeIntoLap,
+                estimated_lap_time: v.mEstimatedLapTime,
                 virtual_energy: *ve_map.get(&v.mID).unwrap_or(&0.0),
             }
         })

@@ -125,6 +125,9 @@ pub struct VehicleScoring {
     // Race gap (seconds / laps behind leader)
     pub time_behind_leader: f64, // mTimeBehindLeader (s); 0.0 for leader
     pub laps_behind_leader: i32, // mLapsBehindLeader; 0 = on lead lap
+    // Live timing (relative gap source)
+    pub time_into_lap: f64,      // mTimeIntoLap — estimated time into current lap (s); updates continuously
+    pub estimated_lap_time: f64, // mEstimatedLapTime — estimated total lap time (s)
     // Virtual Energy (0.0 = no VE / not a hybrid; >0 = fraction 0.0–1.0)
     pub virtual_energy: f32,
 }

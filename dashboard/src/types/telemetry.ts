@@ -67,6 +67,9 @@ export interface VehicleScoring {
   // Race gap
   time_behind_leader: number  // mTimeBehindLeader (s); 0.0 for leader
   laps_behind_leader: number  // mLapsBehindLeader; 0 = on lead lap
+  // Live timing — relative gap
+  time_into_lap: number       // mTimeIntoLap: estimated time into current lap (s), updates continuously
+  estimated_lap_time: number  // mEstimatedLapTime: estimated total lap time (s)
   // Virtual Energy (0.0 = no VE / not a hybrid; >0 = fraction 0.0–1.0)
   virtual_energy: number
 }
