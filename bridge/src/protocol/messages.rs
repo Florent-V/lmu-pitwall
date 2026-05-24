@@ -41,6 +41,17 @@ pub struct WeatherData {
     pub dark_cloud: f64,        // cloud coverage 0.0–1.0 (mDarkCloud) — unreliable in LMU
     /// Cloud coverage 0.0–1.0 derived from REST API sky_type; more reliable than dark_cloud.
     pub cloudiness: f64,
+    pub avg_path_wetness: f64,  // actual water on racing line 0.0–1.0 (mAvgPathWetness)
+    pub min_path_wetness: f64,  // minimum wetness on racing line (mMinPathWetness)
+    pub max_path_wetness: f64,  // maximum wetness on racing line (mMaxPathWetness)
+    /// Horizontal wind speed from live mWind vector (m/s). None when < 0.1 m/s (calm).
+    pub wind_speed_live: Option<f64>,
+    /// Wind direction relative to the player car's nose, degrees.
+    /// 0° = wind blows toward the front (headwind), ±180° = tailwind, ±90° = crosswind.
+    /// Positive = wind from the right side. None when calm or player vehicle not found.
+    /// NOTE: mWind is a velocity vector (air flows TO this direction). Verify empirically
+    /// and flip sign / add 180° in build_session_info if the convention appears inverted.
+    pub wind_rel_deg: Option<f64>,
     /// 5 forecast nodes: 0%, 25%, 50%, 75%, 100% of session length.
     /// Empty when LMU REST API is unavailable.
     pub forecast: Vec<WeatherForecastNode>,
@@ -169,6 +180,8 @@ pub enum ServerMessage {
         // Whether this car supports VE.
         // None = not yet determined.
         ve_available: Option<bool>,
+        /// World heading in degrees, 0 = North, clockwise positive (derived from mOri[2]).
+        heading_deg: f64,
     },
 
     /// Medium frequency: ~5Hz
