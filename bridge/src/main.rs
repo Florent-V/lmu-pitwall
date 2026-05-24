@@ -1,6 +1,7 @@
 // On Windows: suppress the console window entirely (GUI subsystem)
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod app_config;
 mod assets;
 mod config;
 mod electronics;
@@ -110,6 +111,10 @@ fn build_telemetry_update(
     let lv = veh.mLocalVel;
     let speed_ms = (lv.x * lv.x + lv.y * lv.y + lv.z * lv.z).sqrt();
 
+    let fwd_x = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(veh.mOri[2].x)) };
+    let fwd_z = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(veh.mOri[2].z)) };
+    let heading_deg = (-fwd_x).atan2(fwd_z).to_degrees().rem_euclid(360.0);
+
     // delta_best is now a named field in LMU v1.3 TelemInfoV01.
     let delta_best = veh.mDeltaBest;
     let elapsed_time = veh.mElapsedTime;
@@ -172,6 +177,7 @@ fn build_telemetry_update(
         fuel_avg_lap_time:      fuel.avg_lap_time,
         ve_history,
         ve_available,
+        heading_deg,
     })
 }
 
@@ -282,6 +288,67 @@ fn build_session_info(sc: &rF2ScoringBuffer, forecast: Vec<garage_api::WeatherFo
     let cloudiness = forecast.first()
         .map(|n| (n.sky_type as f64 / 10.0).clamp(0.0, 1.0))
         .unwrap_or(info.mDarkCloud);
+
+    // Live wind relative to player car heading, derived from mWind (world velocity vector)
+    // and mOri (orientation matrix, row 2 = car forward in world coords).
+    let wx = info.mWind.x;
+    let wz = info.mWind.z;
+    let horiz_speed = (wx * wx + wz * wz).sqrt();
+    let (wind_speed_live, wind_rel_deg) = if horiz_speed < 0.1 {
+        (None, None)
+    } else {
+        let num = (info.mNumVehicles as usize).min(MAX_MAPPED_VEHICLES);
+        let rel = sc.mVehicles[..num]
+            .iter()
+            .find(|v| v.mIsPlayer != 0)
+            .map(|player| {
+                // Read mOri[2] (car forward axis in world) from packed struct via ptr copy.
+                let fwd_x = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(player.mOri[2].x)) };
+                let fwd_z = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(player.mOri[2].z)) };
+                // Heading = angle from +Z axis (world forward), clockwise positive.
+                let car_heading  = fwd_x.atan2(fwd_z);
+                let wind_heading = wx.atan2(wz);
+                // mWind points TO where wind blows; add π so that wind opposing car = 0°.
+                let rel_rad = (wind_heading - car_heading) + std::f64::consts::PI;
+                let deg = rel_rad.to_degrees();
+                ((deg + 180.0).rem_euclid(360.0)) - 180.0
+            });
+        (Some(horiz_speed), rel)
+    };
+
+    // Fallback: mWind is always 0 in LMU shared memory; use forecast[0] wind data
+    // from the REST API instead. wind_direction convention: FROM which direction
+    // wind blows (standard meteorological), 0=N, 1=NE, 2=E … 7=NW.
+    let (wind_speed_live, wind_rel_deg) = if wind_speed_live.is_none() {
+        let fnode = forecast.first();
+        let fspeed = fnode.and_then(|n| n.wind_speed).filter(|&s| s >= 0.1);
+        if let Some(spd) = fspeed {
+            let num = (info.mNumVehicles as usize).min(MAX_MAPPED_VEHICLES);
+            let frel = fnode
+                .and_then(|n| n.wind_direction)
+                .and_then(|dir| {
+                    sc.mVehicles[..num]
+                        .iter()
+                        .find(|v| v.mIsPlayer != 0)
+                        .map(|player| {
+                            let fwd_x = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(player.mOri[2].x)) };
+                            let fwd_z = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(player.mOri[2].z)) };
+                            let car_heading = fwd_x.atan2(fwd_z);
+                            // FROM direction → same convention as headwind=0°
+                            let wind_from_rad = (dir as f64 * 45.0).to_radians();
+                            let rel_rad = wind_from_rad - car_heading;
+                            let deg = rel_rad.to_degrees();
+                            ((deg + 180.0).rem_euclid(360.0)) - 180.0
+                        })
+                });
+            (Some(spd), frel)
+        } else {
+            (None, None)
+        }
+    } else {
+        (wind_speed_live, wind_rel_deg)
+    };
+
     ServerMessage::SessionInfo {
         track_name:      bytes_to_str(&info.mTrackName).to_string(),
         track_length:    info.mLapDist,
@@ -290,7 +357,12 @@ fn build_session_info(sc: &rF2ScoringBuffer, forecast: Vec<garage_api::WeatherFo
             track_temp:     info.mTrackTemp,
             rain_intensity: info.mRaining,
             dark_cloud:     info.mDarkCloud,
+            avg_path_wetness:  info.mAvgPathWetness,
+            min_path_wetness:  info.mMinPathWetness,
+            max_path_wetness:  info.mMaxPathWetness,
             cloudiness,
+            wind_speed_live,
+            wind_rel_deg,
             forecast,
         },
         // Filter mMaxLaps: time-based races use 999999, uninitialized can be INT32_MAX.
@@ -990,15 +1062,17 @@ async fn task_broadcaster(
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     let config = Config::parse();
+    let app_cfg = crate::app_config::AppConfig::load_or_create();
+    let port: u16 = config.ws_port.or(app_cfg.port).unwrap_or(9000);
 
     // Single-instance guard: if the port already responds, check whether it is
     // the same version or an older one.
     //  • Same/newer version already running → exit silently (no duplicate tab).
     //  • Older version running → signal it to shut down, wait for the port to
     //    free up, then fall through to start the new server normally.
-    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", config.ws_port).parse()?;
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse()?;
     if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok() {
-        let version_url = format!("http://127.0.0.1:{}/api/version", config.ws_port);
+        let version_url = format!("http://127.0.0.1:{}/api/version", port);
         let running_version = ureq::get(&version_url)
             .call()
             .ok()
@@ -1012,7 +1086,7 @@ async fn main() -> Result<()> {
 
         if older_version_running {
             // Shut down the old instance and wait for the port to become free.
-            let shutdown_url = format!("http://127.0.0.1:{}/api/shutdown", config.ws_port);
+            let shutdown_url = format!("http://127.0.0.1:{}/api/shutdown", port);
             let _ = ureq::post(&shutdown_url).call();
 
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -1078,7 +1152,7 @@ async fn main() -> Result<()> {
     info!("LMU Bridge v{}", env!("CARGO_PKG_VERSION"));
     info!(
         "Config: port={} telemetry_fps={} scoring_fps={}",
-        config.ws_port, config.telemetry_fps, config.scoring_fps
+        port, config.telemetry_fps, config.scoring_fps
     );
 
     // Watch channel for latest AllDriversUpdate (sent to new clients on connect).
@@ -1096,14 +1170,14 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(RwLock::new(TelemetryState::new()));
     let engineer_service = Arc::new(race_engineer::RaceEngineerService::new());
-    let ws    = Arc::new(WebSocketServer::new(config.ws_port, all_drivers_rx, version_info_rx, connection_status_rx, engineer_service.clone()));
+    let ws    = Arc::new(WebSocketServer::new(port, all_drivers_rx, version_info_rx, connection_status_rx, engineer_service.clone()));
 
     // Task 1 + 3: Shared memory polling + health check
     {
         let state = state.clone();
         let ws    = ws.clone();
-        let port  = config.ws_port;
-        tokio::spawn(async move { task_polling(state, ws, port, connection_status_tx).await });
+        let ws_port = port;
+        tokio::spawn(async move { task_polling(state, ws, ws_port, connection_status_tx).await });
     }
 
     // Task 2: Rate-limited WebSocket broadcaster
@@ -1121,9 +1195,9 @@ async fn main() -> Result<()> {
     // Combined HTTP + WebSocket server
     {
         let ws   = ws.clone();
-        let port = config.ws_port;
+        let http_port = port;
         tokio::spawn(async move {
-            if let Err(e) = http_server::run(ws, port).await {
+            if let Err(e) = http_server::run(ws, http_port).await {
                 tracing::error!("HTTP server error: {}", e);
             }
         });
@@ -1131,7 +1205,7 @@ async fn main() -> Result<()> {
 
     // Optionally open the browser after a short delay to let the server bind.
     if !config.no_browser {
-        let url = format!("http://localhost:{}", config.ws_port);
+        let url = format!("http://localhost:{}", port);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             if let Err(e) = open::that(&url) {

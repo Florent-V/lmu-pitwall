@@ -30,6 +30,7 @@ export interface WeatherSnapshot {
   track_temp: number
   air_temp: number
   dark_cloud: number
+  avg_path_wetness: number  // actual water on track 0.0–1.0
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,7 @@ interface TelemetrySection {
   fuel_avg_lap_time: number
   ve_history: number[] | null
   ve_available: boolean | null
+  heading_deg: number
 }
 
 interface ScoringSection {
@@ -177,6 +179,7 @@ const defaultTelemetry: TelemetrySection = {
   fuel_avg_lap_time: 0,
   ve_history: null,
   ve_available: null,
+  heading_deg: 0,
 }
 
 const defaultScoring: ScoringSection = {
@@ -327,6 +330,7 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
             fuel_avg_lap_time: msg.fuel_avg_lap_time,
             ve_history: msg.ve_history ?? null,
             ve_available: msg.ve_available ?? null,
+            heading_deg: msg.heading_deg,
           },
         })
         break
@@ -394,6 +398,7 @@ export const useTelemetryStore = create<TelemetryStore>((set) => ({
                 track_temp:     msg.weather.track_temp,
                 air_temp:       msg.weather.air_temp,
                 dark_cloud:     msg.weather.dark_cloud,
+                avg_path_wetness:  msg.weather.avg_path_wetness,
               }
               weatherHistory = [...weatherHistory, snap].slice(-MAX_HISTORY)
             }
