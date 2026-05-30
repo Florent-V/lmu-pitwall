@@ -138,6 +138,10 @@ pub struct VehicleScoring {
     pub laps_behind_leader: i32, // mLapsBehindLeader; 0 = on lead lap
     // Virtual Energy (0.0 = no VE / not a hybrid; >0 = fraction 0.0–1.0)
     pub virtual_energy: f32,
+    // Flags / penalties
+    pub flag: u8,           // mFlag: 0=none,1=blue,2=yellow,4=black,5=B/W,6=striped,8=stop&go,9=served
+    pub num_penalties: i32, // mNumPenalties: outstanding penalty count
+    pub num_pitstops: i32,  // mNumPitstops: pit stops completed
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

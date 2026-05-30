@@ -28,6 +28,29 @@ function ClassBadge({ position, vehicleClass }: { position: string; vehicleClass
   )
 }
 
+/** Badge for rF2 mFlag values shown next to non-player drivers */
+function FlagBadge({ flag }: { flag: number }) {
+  if (!flag) return null
+  const styles: Record<number, { label: string; color: string; bg: string }> = {
+    1:  { label: 'BLUE',  color: '#3b82f6', bg: '#3b82f622' },
+    2:  { label: 'YEL',   color: '#eab308', bg: '#eab30822' },
+    4:  { label: '⚫BLK', color: '#e5e5e5', bg: '#27272a' },
+    5:  { label: 'B/W',   color: '#a3a3a3', bg: '#a3a3a322' },
+    6:  { label: 'MECH',  color: '#f97316', bg: '#f9731622' },
+    8:  { label: 'S&G',   color: '#ef4444', bg: '#ef444422' },
+    9:  { label: 'S&G✓',  color: '#22c55e', bg: '#22c55e22' },
+  }
+  const s = styles[flag]
+  if (!s) return null
+  return (
+    <span style={{
+      fontFamily: fonts.mono, fontSize: 10, fontWeight: 700,
+      color: s.color, background: s.bg, border: `1px solid ${s.color}66`,
+      borderRadius: 3, padding: '1px 4px', flexShrink: 0, lineHeight: 1.4,
+    }}>{s.label}</span>
+  )
+}
+
 const SECTOR_PB = '#22c55e'   // green — personal best in this sector
 const SECTOR_SB = '#a855f7'   // purple — session best in this sector
 
@@ -139,6 +162,38 @@ export default function Standings() {
 
   const isRace = sessionType?.toLowerCase().includes('race') ?? false
 
+  // ── Tire age tracking (setState-during-render pattern) ───────────────────
+  interface TireAgeEntry { compound: number; lapAtChange: number }
+  interface TireAgeState { fingerprint: string; ages: Map<number, TireAgeEntry> }
+
+  const [tireAgeState, setTireAgeState] = useState<TireAgeState>({ fingerprint: '', ages: new Map() })
+
+  // Compound fingerprint: only changes when tires are actually swapped
+  const cmpFingerprint = allDrivers.map(d => `${d.id}:${d.tire_compound_front}`).join('|')
+  if (cmpFingerprint !== tireAgeState.fingerprint) {
+    const newAges = new Map(tireAgeState.ages)
+    for (const d of allDrivers) {
+      const prev = newAges.get(d.id)
+      if (!prev) {
+        newAges.set(d.id, { compound: d.tire_compound_front, lapAtChange: d.total_laps })
+      } else if (d.tire_compound_front !== prev.compound) {
+        // Compound changed (tire swap in pit stop)
+        newAges.set(d.id, { compound: d.tire_compound_front, lapAtChange: d.total_laps })
+      }
+    }
+    setTireAgeState({ fingerprint: cmpFingerprint, ages: newAges })
+  }
+
+  // Tire age in laps per driver
+  const tireAgeById = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const d of allDrivers) {
+      const entry = tireAgeState.ages.get(d.id)
+      if (entry) map.set(d.id, Math.max(0, d.total_laps - entry.lapAtChange))
+    }
+    return map
+  }, [allDrivers, tireAgeState.ages])
+
   // Build compound lookup: driver id → compound name
   const compoundById = useMemo(() => {
     const map = new Map<number, string>()
@@ -199,6 +254,12 @@ export default function Standings() {
   // Compound column only when at least one driver has compound name data AND setting allows it
   const hasCompoundData = settingShowCompound && compoundById.size > 0
 
+  // Pit stops column: only show during race and when at least one driver has pitted
+  const hasPitstopData = isRace && sorted.some(v => (v.num_pitstops ?? 0) > 0)
+
+  // Tire age column: only show during race and when we have age data
+  const hasTireAgeData = isRace && tireAgeById.size > 0
+
   // Damage column: show when any driver has at least one damaged zone
   const damageById = useMemo(() => {
     const map = new Map<number, number[]>()
@@ -217,15 +278,17 @@ export default function Standings() {
   const sbLap = Math.min(...validNums(sorted.map((v) => v.best_lap_time)))
 
   // Column widths — sized for 13px mono strings
-  const W_POS  = 44   // class position badge
-  const W_NUM  = 40   // "#99"
-  const W_SEC  = 58   // "88.888"
-  const W_LAP  = 76   // "1:28.888"
-  const W_LAST = 76   // "1:28.888"
-  const W_GAP  = 72   // "+128.888"
-  const W_VE   = 52   // "100%"
-  const W_COMP = 52   // "Medium"
-  const W_DMG  = 54   // 17px dots + 4px gap + 26px % text
+  const W_POS   = 44   // class position badge
+  const W_NUM   = 40   // "#99"
+  const W_SEC   = 58   // "88.888"
+  const W_LAP   = 76   // "1:28.888"
+  const W_LAST  = 76   // "1:28.888"
+  const W_GAP   = 72   // "+128.888"
+  const W_VE    = 52   // "100%"
+  const W_COMP  = 52   // "Medium"
+  const W_DMG   = 54   // 17px dots + 4px gap + 26px % text
+  const W_STOPS = 32   // "3×"
+  const W_AGE   = 40   // "12 L"
 
   const colHdr = (label: string, width: number, right = true) => (
     <span style={{
@@ -259,6 +322,8 @@ export default function Standings() {
           <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, flex: showCarName ? '2 1 140px' : 1, overflow: 'hidden' }}>DRIVER</span>
           {showCarName && <span style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted, flex: '1 1 80px', overflow: 'hidden' }}>CAR</span>}
           {hasCompoundData && colHdr('COMP', W_COMP)}
+          {hasPitstopData && colHdr('PIT', W_STOPS)}
+          {hasTireAgeData && colHdr('AGE', W_AGE)}
           {hasVeData && colHdr('VE', W_VE)}
           {hasDamageData && colHdr('DMG', W_DMG)}
           {colHdr('S1', W_SEC)}
@@ -305,7 +370,7 @@ export default function Standings() {
                   #{v.car_number}
                 </span>
 
-                {/* Driver name + PIT badge */}
+                {/* Driver name + PIT badge + flag badge */}
                 <span style={{
                   display: 'flex', alignItems: 'center', gap: 4,
                   flex: showCarName ? '2 1 140px' : 1,
@@ -327,6 +392,7 @@ export default function Standings() {
                       PIT
                     </span>
                   )}
+                  <FlagBadge flag={v.flag ?? 0} />
                 </span>
 
                 {/* Vehicle name (hidden when narrow) */}
@@ -353,6 +419,36 @@ export default function Standings() {
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }} title={name || 'Unknown'}>
                       {label}
+                    </span>
+                  )
+                })()}
+
+                {/* Pit stop count */}
+                {hasPitstopData && (
+                  <span style={{
+                    fontFamily: fonts.mono, fontSize: 12,
+                    color: (v.num_pitstops ?? 0) > 0 ? colors.text : colors.textMuted,
+                    width: W_STOPS, textAlign: 'right', flexShrink: 0,
+                  }}>
+                    {(v.num_pitstops ?? 0) > 0 ? `${v.num_pitstops}×` : '—'}
+                  </span>
+                )}
+
+                {/* Tire age in laps */}
+                {hasTireAgeData && (() => {
+                  const age = tireAgeById.get(v.id)
+                  const ageColor = age === undefined ? colors.textMuted
+                    : age >= 30 ? '#ef4444'
+                    : age >= 20 ? '#f97316'
+                    : age >= 10 ? '#eab308'
+                    : colors.text
+                  return (
+                    <span style={{
+                      fontFamily: fonts.mono, fontSize: 12,
+                      color: ageColor,
+                      width: W_AGE, textAlign: 'right', flexShrink: 0,
+                    }}>
+                      {age !== undefined ? `${age} L` : '—'}
                     </span>
                   )
                 })()}

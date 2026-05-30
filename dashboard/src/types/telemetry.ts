@@ -74,6 +74,10 @@ export interface VehicleScoring {
   laps_behind_leader: number  // mLapsBehindLeader; 0 = on lead lap
   // Virtual Energy (0.0 = no VE / not a hybrid; >0 = fraction 0.0–1.0)
   virtual_energy: number
+  // Flags / penalties
+  flag: number          // 0=none, 1=blue, 2=yellow, 4=black, 5=B/W, 6=striped, 8=stop&go, 9=served
+  num_penalties: number // outstanding penalty count
+  num_pitstops: number  // pit stops completed
 }
 
 // ---------------------------------------------------------------------------
